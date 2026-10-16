@@ -1,4 +1,3 @@
-/* Card: an item-level container (stat tile, suggestion, setting group). */
 .card {
   border-radius: var(--radius-xl);
   background: var(--item-bg);
@@ -7,7 +6,6 @@
   backdrop-filter: blur(var(--blur));
 }
 
-/* Panel: a screen-level region (capacity header, list pane). Flattens in the Classic layout. */
 .panel {
   border-radius: var(--panel-r);
   background: var(--panel-bg);

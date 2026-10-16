@@ -12,9 +12,7 @@ function initial(): Appearance {
   let stored: Partial<Appearance> = {};
   try {
     stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
-  } catch {
-    /* ignore malformed storage */
-  }
+  } catch {}
   const systemLight = window.matchMedia("(prefers-color-scheme: light)").matches;
   return {
     theme: isTheme(stored.theme) ? stored.theme : systemLight ? "light" : "instrument",

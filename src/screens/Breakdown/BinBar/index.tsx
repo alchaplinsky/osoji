@@ -13,9 +13,7 @@ type BinBarProps = {
   onRemove: (id: number) => void;
   onDrop: (id: number) => void;
   onReview: () => void;
-  /** The list panel is hidden, so the bar may grow wider. */
   wide: boolean;
-  /** Overlays the bottom of a full-screen list (Largest files, Suggestions) instead of the viz column. */
   floating?: boolean;
 };
 

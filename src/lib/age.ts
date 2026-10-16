@@ -1,7 +1,6 @@
 const DAY_MS = 86_400_000;
 const MONTH_DAYS = 30.44;
 
-/** Whole days since `mtimeSec` (Unix seconds); never negative. */
 export function daysSince(mtimeSec: number, now = Date.now()): number {
   return Math.max(0, Math.floor((now - mtimeSec * 1000) / DAY_MS));
 }
@@ -10,12 +9,10 @@ export function monthsSince(mtimeSec: number, now = Date.now()): number {
   return Math.floor(daysSince(mtimeSec, now) / MONTH_DAYS);
 }
 
-/** False for an unknown mtime (0). */
 export function isOlderThan(mtimeSec: number, days: number, now = Date.now()): boolean {
   return mtimeSec > 0 && daysSince(mtimeSec, now) >= days;
 }
 
-/** "Modified this week" … "Not modified in 2 years"; empty for an unknown mtime (0). */
 export function ageText(mtimeSec: number, now = Date.now()): string {
   if (mtimeSec <= 0) return "";
   const days = daysSince(mtimeSec, now);

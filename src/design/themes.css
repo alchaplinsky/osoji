@@ -1,5 +1,3 @@
-/* Colour themes and surface layouts. Switched with data-theme / data-layout on <html>;
-   see theme.ts for the names and useTheme for the React side. */
 
 :root, [data-theme="instrument"] {
   color-scheme: dark;
@@ -76,7 +74,6 @@
   --keep: #A49C90;
 }
 
-/* Surface layouts */
 
 :root, [data-layout="cards"] {
   --pad: 10px;

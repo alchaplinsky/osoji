@@ -31,7 +31,6 @@ const SUGGESTIONS: Suggestion[] = [
   suggestion("/private/var/vm", 12, "keep", "Swap files. macOS manages these itself."),
 ].sort((a, b) => b.size - a.size);
 
-/** `?bin=all` starts with every safe suggestion already in the bin. */
 const PREFILL = new URLSearchParams(location.search).get("bin") === "all";
 
 export default function SuggestionsPreview() {

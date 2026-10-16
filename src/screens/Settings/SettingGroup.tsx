@@ -15,7 +15,6 @@ type SettingRowProps = {
   label: string;
   desc: string;
   checked: boolean;
-  /** Omit to lock the setting in its current state. */
   onChange?: (checked: boolean) => void;
   title?: string;
 };

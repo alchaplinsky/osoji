@@ -9,9 +9,7 @@ import LargestRow from "./LargestRow";
 import styles from "./Largest.module.css";
 
 type LargestScreenProps = {
-  /** Sorted by size, largest first. */
   entries: FileEntry[];
-  /** Ids of "safe" suggestions; an entry is safe when it or any ancestor is in the set. */
   safeIds: ReadonlySet<number>;
   binItems: BinItem[];
   binIds: ReadonlySet<number>;

@@ -44,7 +44,6 @@ const ENTRIES: FileEntry[] = [
 
 const SAFE_IDS: ReadonlySet<number> = new Set([102, 108, CORE_SIM_CACHES]);
 
-/** `?bin=N` starts with the N largest entries already in the bin. */
 function initialBin(): BinItem[] {
   const n = Number(new URLSearchParams(location.search).get("bin")) || 0;
   return ENTRIES.slice(0, n).map(toBinItem);
