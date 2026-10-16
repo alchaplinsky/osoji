@@ -1,0 +1,100 @@
+.panel {
+  width: 336px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left-color: var(--line);
+  animation: springIn .45s var(--ease-spring-soft);
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.heading {
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta {
+  font-size: 11.5px;
+  color: var(--fg2);
+  white-space: nowrap;
+}
+
+.list {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px 8px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 16px 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: var(--radius-md);
+  transition: background .2s;
+}
+.rowDraggable { cursor: grab; }
+.rowHovered { background: var(--card2); }
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.body { min-width: 0; }
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.titleDir { cursor: pointer; }
+
+.name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chevron {
+  color: var(--fg2);
+  opacity: .5;
+}
+
+.track {
+  height: 2px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width .6s var(--ease-out);
+}
+
+.size {
+  color: var(--fg);
+  text-align: right;
+}

@@ -1,0 +1,83 @@
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+.row:hover { background: var(--card2); }
+
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--fg3);
+}
+
+.text { flex: 1; min-width: 0; }
+
+.name,
+.path {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.name { font-weight: 600; }
+.path { font-size: 11px; color: var(--fg3); margin-top: 2px; }
+
+.size {
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.modes { display: flex; gap: 8px; }
+
+.mode {
+  flex: 1;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1.5px solid var(--line);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  transition: border-color .2s, background .2s;
+}
+.mode.selected { border-color: var(--ac); background: var(--acsoft); }
+.mode:disabled { opacity: .4; cursor: default; }
+.modeLabel { font-weight: 600; font-size: 12.5px; }
+.modeHint { font-size: 11px; color: var(--fg2); margin-top: 1px; }
+
+.progress {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.progressFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  border-radius: 2px;
+  background: var(--ac);
+  animation: slide 1.2s linear infinite;
+}
+
+@keyframes slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.error,
+.warning { flex: 1; font-size: 12px; color: var(--review); }

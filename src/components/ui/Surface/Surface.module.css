@@ -1,0 +1,19 @@
+.card {
+  border-radius: var(--radius-xl);
+  background: var(--item-bg);
+  border: 1px solid var(--line);
+  box-shadow: var(--panel-sh);
+  backdrop-filter: blur(var(--blur));
+}
+
+.panel {
+  border-radius: var(--panel-r);
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-bd);
+  border-bottom-color: var(--panel-bd-b);
+  box-shadow: var(--panel-sh);
+  backdrop-filter: blur(var(--blur));
+}
+
+.statTile { padding: 13px 16px; }
+.statValue { display: block; margin-top: 3px; }

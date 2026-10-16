@@ -1,0 +1,16 @@
+.box {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: var(--radius-xs);
+  border: 1.5px solid var(--line2);
+  background: transparent;
+  color: var(--acfg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: none;
+  transition: background .2s, border-color .2s, transform .3s var(--ease-spring-hard);
+}
+.checked { background: var(--ac); border-color: var(--ac); }

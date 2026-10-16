@@ -1,0 +1,30 @@
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  padding: 12px 20px 12px 14px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-radius: var(--radius-pill);
+  background: var(--card2);
+  border: 1px solid var(--line2);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(20px);
+  animation: toastIn .5s var(--ease-spring);
+}
+.icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--ac);
+  color: var(--acfg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.title { font-weight: 600; }
+.sub { font-size: 12px; color: var(--fg2); }

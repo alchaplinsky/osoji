@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { cancelScan, startScan, type ProgressMsg, type ScanSummary } from "../lib/api";
 
 export type ScanStatus = "idle" | "scanning" | "done" | "error";
@@ -8,18 +8,24 @@ export function useScan() {
   const [progress, setProgress] = useState<ProgressMsg | null>(null);
   const [summary, setSummary] = useState<ScanSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const generation = useRef(0);
 
   const start = useCallback(async (root: string) => {
+    const gen = ++generation.current;
     setStatus("scanning");
     setError(null);
     setSummary(null);
     setProgress(null);
     try {
-      const s = await startScan(root, setProgress);
+      const s = await startScan(root, (next) => {
+        if (gen === generation.current) setProgress(next);
+      });
+      if (gen !== generation.current) return null;
       setSummary(s);
       setStatus("done");
       return s;
     } catch (e) {
+      if (gen !== generation.current) return null;
       setError(String(e));
       setStatus("error");
       return null;
@@ -27,6 +33,13 @@ export function useScan() {
   }, []);
 
   const cancel = useCallback(() => cancelScan(), []);
+  const reset = useCallback(() => {
+    generation.current++;
+    setStatus("idle");
+    setProgress(null);
+    setSummary(null);
+    setError(null);
+  }, []);
 
-  return { status, progress, summary, error, start, cancel };
+  return { status, progress, summary, error, start, cancel, reset };
 }

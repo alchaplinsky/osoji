@@ -1,0 +1,70 @@
+.screen {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  animation: springIn .5s var(--ease-spring-soft);
+}
+
+.menuAnchor { position: relative; }
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: var(--body-gap);
+  margin-top: var(--gap2);
+}
+
+.viz {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: var(--viz-pad);
+}
+
+.stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px 0 72px;
+}
+
+.hoverLabel {
+  position: absolute;
+  top: var(--viz-pad);
+  left: calc(var(--viz-pad) + 4px);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 8px);
+  pointer-events: none;
+}
+
+.hoverSwatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.hoverName,
+.hint {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hoverName { color: var(--fg); font-weight: 600; }
+.hint { color: var(--fg3); }
+
+.hoverMeta {
+  font-size: 12px;
+  color: var(--fg2);
+  white-space: nowrap;
+}

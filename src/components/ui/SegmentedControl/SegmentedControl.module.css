@@ -1,0 +1,27 @@
+.root {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(var(--blur));
+}
+
+.opt {
+  height: 26px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg2);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .25s, color .25s;
+}
+.opt:disabled { opacity: .4; cursor: default; }
+.md .opt { height: 28px; padding: 0 14px; }
+.active { background: var(--acsoft); color: var(--fg); }

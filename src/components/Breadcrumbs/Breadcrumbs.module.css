@@ -1,0 +1,35 @@
+.root {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sep { color: var(--fg3); }
+
+.btn {
+  background: none;
+  border: 0;
+  padding: 5px 7px;
+  border-radius: var(--radius-sm);
+  color: var(--fg2);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.btn:hover { background: var(--card2); }
+
+.current {
+  color: var(--fg);
+  font-weight: 600;
+}
