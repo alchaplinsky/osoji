@@ -10,11 +10,8 @@ export type VizProps = {
   onHover: (id: HoverId) => void;
   onDrill: (id: number) => void;
   onUp: () => void;
-  /** Clicking a file; directories drill instead. */
   onSelectFile: (id: number) => void;
-  /** Defaults to `startBinDrag`. */
   onDragStart?: (e: DragEvent, id: number) => void;
-  /** Font size of the centre size label in px, where the view has one. */
   centerSize?: number;
   className?: string;
 };

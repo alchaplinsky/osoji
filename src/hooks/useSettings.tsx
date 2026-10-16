@@ -13,9 +13,7 @@ function initial(): Settings {
   let stored: Partial<Settings> = {};
   try {
     stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
-  } catch {
-    /* ignore malformed storage */
-  }
+  } catch {}
   return {
     confirmBig: typeof stored.confirmBig === "boolean" ? stored.confirmBig : DEFAULTS.confirmBig,
     watchers: typeof stored.watchers === "boolean" ? stored.watchers : DEFAULTS.watchers,

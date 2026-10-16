@@ -51,10 +51,18 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    volumeInfo(scanRoot).then(setVolume).catch(console.error);
+    let active = true;
+    setVolume(null);
+    volumeInfo(scanRoot)
+      .then((next) => active && setVolume(next))
+      .catch(console.error);
+    return () => {
+      active = false;
+    };
   }, [scanRoot]);
 
   const { load, reset } = explorer;
+  const { reset: resetScan } = scan;
   const { load: loadInsights, reset: resetInsights } = insights;
   const { refresh: refreshWatchers, reset: resetWatchers } = watchers;
   const { clear: clearBin } = bin;
@@ -72,17 +80,36 @@ export default function App() {
     }
   }, [scan.status, load, reset, loadInsights, resetInsights, refreshWatchers, resetWatchers, clearBin]);
 
-  const pickRoot = useCallback(
-    async (choice: "disk" | "home" | "folder") => {
-      if (choice === "disk") return setScanRoot("/");
-      if (choice === "home") return setScanRoot(home || (await homeDir()));
-      const dir = await open({ directory: true, multiple: false, defaultPath: scanRoot });
-      if (typeof dir === "string") setScanRoot(dir);
+  const changeRoot = useCallback(
+    (next: string) => {
+      if (next === scanRoot || scan.status === "scanning") return;
+      setScanRoot(next);
+      setScreen("scan");
+      resetScan();
+      reset();
+      resetInsights();
+      resetWatchers();
+      clearBin();
     },
-    [home, scanRoot],
+    [scanRoot, scan.status, resetScan, reset, resetInsights, resetWatchers, clearBin],
   );
 
-  const rootLabel = scanRoot === "/" ? (volume?.name ?? "Macintosh HD") : home && scanRoot.startsWith(home) ? "~" + scanRoot.slice(home.length) : scanRoot;
+  const pickRoot = useCallback(
+    async (choice: "disk" | "home" | "folder") => {
+      if (choice === "disk") return changeRoot("/");
+      if (choice === "home") return changeRoot(home || (await homeDir()));
+      const dir = await open({ directory: true, multiple: false, defaultPath: scanRoot });
+      if (typeof dir === "string") changeRoot(dir);
+    },
+    [changeRoot, home, scanRoot],
+  );
+
+  const rootLabel =
+    scanRoot === "/"
+      ? (volume?.name ?? "Macintosh HD")
+      : home && (scanRoot === home || scanRoot.startsWith(`${home}/`))
+        ? "~" + scanRoot.slice(home.length)
+        : scanRoot;
   const scanned = scan.status === "done" && explorer.view !== null;
 
   const startScan = () => {
@@ -95,7 +122,6 @@ export default function App() {
     explorer.load(id).catch(console.error);
   };
 
-  /** Describe a node below the current view as a bin item, with its full path and ancestry. */
   const describe = (id: number): BinItem | null => {
     const { view, info } = explorer;
     if (!view || !info) return null;
@@ -131,15 +157,19 @@ export default function App() {
     setSweepError(null);
     try {
       const result = await trashNodes(bin.items.map((i) => i.id));
-      // If the current folder (or one of its ancestors) was trashed, step up to the nearest surviving parent.
       const here = [explorer.currentId, ...(explorer.info?.ancestors.map((a) => a.id) ?? [])];
-      const trashedHere = bin.items.find((i) => here.includes(i.id));
+      const moved = new Set(result.trashed);
+      const trashedHere = bin.items.find((i) => moved.has(i.id) && here.includes(i.id));
+      result.trashed.forEach(bin.remove);
       await Promise.all([explorer.refresh(trashedHere ? (trashedHere.ancestors.at(-1) ?? 0) : explorer.currentId), insights.load(), watchers.refresh()]);
-      bin.clear();
-      setReview(false);
       setHoverId(null);
+      if (result.failed.length > 0) {
+        setSweepError(result.failed.join("\n"));
+        return;
+      }
+      setReview(false);
       const n = result.count === 1 ? "1 item" : `${result.count} items`;
-      showToast(`Moved ${humanBytes(result.freed)} to the Trash`, `${n}. Empty the Trash to reclaim the space on ${volume?.name ?? "this disk"}.`);
+      showToast(`Moved ${humanBytes(result.bytes)} to the Trash`, `${n}. Empty the Trash to reclaim the space on ${volume?.name ?? "this disk"}.`);
     } catch (e) {
       setSweepError(String(e));
     } finally {
@@ -155,7 +185,6 @@ export default function App() {
     if (typeof dir === "string") watchers.add(dir);
   };
 
-  /** Jump to the watched folder in the Breakdown; for a file, open its parent and highlight it. */
   const cleanUp = async (status: WatcherStatus) => {
     if (status.id === null) return;
     setScreen("breakdown");
@@ -181,6 +210,7 @@ export default function App() {
       <Sidebar
         volume={volume}
         scanRoot={scanRoot}
+        rootPickerDisabled={scan.status === "scanning" || sweeping}
         onPickRoot={pickRoot}
         scanned={scanned}
         screen={active}

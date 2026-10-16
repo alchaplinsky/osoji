@@ -6,7 +6,6 @@ type ExtensionCardProps = {
   desc: string;
   soon?: boolean;
   on?: boolean;
-  /** Without it the card has no button. */
   onToggle?: () => void;
 };
 

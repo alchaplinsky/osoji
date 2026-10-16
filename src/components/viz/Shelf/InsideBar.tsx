@@ -17,7 +17,6 @@ type InsideBarProps = {
 const KIDS = 12;
 const LABEL_SHARE = 13;
 
-/** A slimmer bar breaking down one folder of the shelf into its largest children. */
 export default function InsideBar({ focus, theme, related, actions }: InsideBarProps) {
   return (
     <div>

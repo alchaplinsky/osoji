@@ -12,7 +12,7 @@ export type NodeInfo = {
   id: number; name: string; path: string; size: number; items: number; dir: boolean;
   error: boolean; trashed: boolean; mtime: number; ancestors: Crumb[];
 };
-export type TrashResult = { freed: number; count: number };
+export type TrashResult = { bytes: number; count: number; trashed: number[]; failed: string[] };
 export type VolumeInfo = { name: string; mount: string; total: number; free: number };
 export type WatchHit = { path: string; id: number | null; size: number; dir: boolean };
 

@@ -13,7 +13,6 @@ const STATUSES: WatcherStatus[] = [
 
 const EXTRA: WatcherStatus = { path: "/Users/alex/Library/Developer/Xcode/DerivedData", limit: 10 * GB, id: 57, size: Math.round(16.1 * GB), dir: true };
 
-/** `?empty=1` starts with no watched folders. */
 const EMPTY = new URLSearchParams(location.search).get("empty") === "1";
 
 export default function WatchersPreview() {

@@ -5,7 +5,6 @@ import type { HoverId } from "../../lib/types";
 import { otherKey, type SliceKey } from "../../components/Sunburst/layout";
 
 export type Slice = {
-  /** `null` for the merged "smaller items" slice. */
   node: ViewNode | null;
   key: SliceKey;
   hover: HoverId;
@@ -14,7 +13,6 @@ export type Slice = {
   fill: string;
 };
 
-/** One slice per child of `view`, plus its merged tail, coloured by position. */
 export function slicesOf(view: ViewNode, theme: ThemeName): Slice[] {
   const slices: Slice[] = view.children.map((n, i) => ({ node: n, key: n.id, hover: n.id, name: n.name, size: n.size, fill: tone(theme, i) }));
   if (view.other > 0) {

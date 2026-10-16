@@ -1,6 +1,5 @@
 export type Rect = { x: number; y: number; w: number; h: number };
 
-/** Squarified treemap layout of `items` (by `value`) into the rectangle (x, y, w, h). Zero values are skipped. */
 export function squarify<T extends { value: number }>(items: T[], x: number, y: number, w: number, h: number): (T & Rect)[] {
   const out: (T & Rect)[] = [];
   const list = items.filter((it) => it.value > 0);

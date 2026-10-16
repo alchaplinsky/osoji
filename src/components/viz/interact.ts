@@ -6,7 +6,6 @@ import type { VizProps } from "./types";
 
 export type PointerActions = Pick<VizProps, "onHover" | "onDrill" | "onSelectFile">;
 
-/** Hover reports `hover`; click drills into a directory or selects a file. `node: null` (smaller items) only hovers. */
 export function pointerProps(node: ViewNode | null, hover: HoverId, actions: PointerActions) {
   return {
     onMouseEnter: () => actions.onHover(hover),
@@ -17,7 +16,6 @@ export function pointerProps(node: ViewNode | null, hover: HoverId, actions: Poi
   };
 }
 
-/** Makes a real node draggable towards the bin. */
 export function dragProps(node: ViewNode | null, onDragStart: VizProps["onDragStart"] = startBinDrag) {
   if (!node) return {};
   return { draggable: true, onDragStart: (e: DragEvent) => onDragStart(e, node.id) };

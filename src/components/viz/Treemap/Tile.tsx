@@ -9,7 +9,6 @@ import styles from "./Treemap.module.css";
 
 type TileProps = {
   slice: Slice;
-  /** Outer cell; the tile is inset by 2px on each side. */
   cell: Rect;
   theme: ThemeName;
   hovered: boolean;

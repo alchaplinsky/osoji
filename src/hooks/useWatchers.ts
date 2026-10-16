@@ -35,10 +35,6 @@ function normalize(path: string): string {
   return path.length > 1 ? path.replace(/\/+$/, "") : path;
 }
 
-/**
- * Folders the user keeps an eye on, checked against the latest scan. Sizes stay empty until `refresh`;
- * once loaded, a newly added folder is looked up on its own.
- */
 export function useWatchers(): Watchers {
   const [watchers, setWatchers] = useState<Watcher[]>(load);
   const [hits, setHits] = useState<ReadonlyMap<string, WatchHit> | null>(null);
@@ -52,8 +48,11 @@ export function useWatchers(): Watchers {
 
   const refresh = useCallback(async () => {
     const paths = latest.current.map((w) => w.path);
-    if (paths.length === 0) return;
-    const gen = generation.current;
+    const gen = ++generation.current;
+    if (paths.length === 0) {
+      setHits(new Map());
+      return;
+    }
     const result = await watchStatus(paths);
     if (gen === generation.current) setHits(new Map(result.map((h) => [h.path, h])));
   }, []);
@@ -64,7 +63,7 @@ export function useWatchers(): Watchers {
   }, []);
 
   useEffect(() => {
-    if (hits && watchers.some((w) => !hits.has(w.path))) refresh().catch(console.error);
+    if (hits !== null && watchers.some((w) => !hits.has(w.path))) refresh().catch(console.error);
   }, [hits, watchers, refresh]);
 
   const add = useCallback((path: string, limit = DEFAULT_WATCH_LIMIT) => {

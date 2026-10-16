@@ -91,7 +91,6 @@ function leaves(node: ViewNode): ViewNode[] {
   return node.dir ? node.children.flatMap(leaves) : [node];
 }
 
-/** `?bin=N` starts with the N largest files already in the bin. */
 function initialBin(): BinItem[] {
   const n = Number(new URLSearchParams(location.search).get("bin")) || 0;
   return leaves(ROOT)
@@ -102,7 +101,6 @@ function initialBin(): BinItem[] {
 
 const VIZ: Viz[] = ["sunburst", "treemap", "shelf", "orbit"];
 
-/** `?viz=treemap|shelf|orbit` starts on that view. */
 function initialViz(): Viz {
   const v = new URLSearchParams(location.search).get("viz");
   return VIZ.find((x) => x === v) ?? "sunburst";

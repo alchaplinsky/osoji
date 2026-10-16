@@ -5,11 +5,9 @@ import styles from "./CenterLabel.module.css";
 
 type CenterLabelProps = {
   view: ViewNode;
-  /** Font size of the size numeral in px. */
   size: number;
 };
 
-/** Size and name of the current folder, centred over a radial chart. */
 export default function CenterLabel({ view, size }: CenterLabelProps) {
   return (
     <div className={styles.center}>

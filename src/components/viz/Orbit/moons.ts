@@ -12,7 +12,6 @@ export function orbitGeometry(w: number, h: number): OrbitGeometry {
   return { cx: w / 2, cy: h / 2, R: Math.max(0, Math.min(w, h) / 2 - 6) };
 }
 
-/** Moons placed around the centre at their cumulative share of `total`, radius growing with the square root of the share. */
 export function placeMoons(slices: Slice[], total: number, { cx, cy, R }: OrbitGeometry): Moon[] {
   let cum = 0;
   return slices.map((slice, i) => {

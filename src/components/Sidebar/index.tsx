@@ -10,17 +10,16 @@ export type { RootChoice };
 type SidebarProps = {
   volume: Volume | null;
   scanRoot: string;
+  rootPickerDisabled?: boolean;
   onPickRoot: (choice: RootChoice) => void;
   scanned: boolean;
   screen: Screen;
   onNavigate: (s: Screen) => void;
-  /** Shown next to Suggestions once scanned, e.g. the reclaimable size. */
   suggestBadge?: string;
-  /** The Watchers extension is on; `badge` e.g. "2 over". */
   watchers?: { badge?: string } | null;
 };
 
-export default function Sidebar({ volume, scanRoot, onPickRoot, scanned, screen, onNavigate, suggestBadge, watchers }: SidebarProps) {
+export default function Sidebar({ volume, scanRoot, rootPickerDisabled, onPickRoot, scanned, screen, onNavigate, suggestBadge, watchers }: SidebarProps) {
   const item = (target: Screen) => {
     const locked = target !== "scan" && target !== "settings" && !scanned;
     return {
@@ -41,7 +40,7 @@ export default function Sidebar({ volume, scanRoot, onPickRoot, scanned, screen,
         </div>
       </div>
 
-      <DiskCard volume={volume} scanRoot={scanRoot} onPickRoot={onPickRoot} />
+      <DiskCard volume={volume} scanRoot={scanRoot} disabled={rootPickerDisabled} onPickRoot={onPickRoot} />
 
       <NavSection>
         <NavItem icon="scan" label={scanned ? "Scan again" : "Scan"} {...item("scan")} />

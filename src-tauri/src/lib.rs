@@ -55,7 +55,6 @@ struct ViewNode {
     dir: bool,
     error: bool,
     children: Vec<ViewNode>,
-    /// Bytes of children merged away because they were too small or past top_k.
     other: u64,
     other_count: u32,
 }
@@ -82,8 +81,10 @@ struct NodeInfo {
 
 #[derive(Serialize)]
 struct TrashResult {
-    freed: u64,
+    bytes: u64,
     count: usize,
+    trashed: Vec<NodeId>,
+    failed: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -109,7 +110,6 @@ fn name_of(arena: &Arena, id: NodeId) -> String {
     String::from_utf8_lossy(arena.name(id)).into_owned()
 }
 
-/// Node ids from the root down to the parent of `id`.
 fn ancestors_of(arena: &Arena, id: NodeId) -> Vec<NodeId> {
     let mut out = Vec::new();
     let mut p = arena.parent[id as usize];
@@ -210,16 +210,17 @@ async fn start_scan(
         })
     };
 
-    let result = {
+    let task = {
         let (cfg, progress, cancel) = (cfg.clone(), progress.clone(), cancel.clone());
         tauri::async_runtime::spawn_blocking(move || scan_macos::walk(&cfg, &progress, &cancel))
             .await
-            .map_err(|e| e.to_string())?
     };
     done.store(true, Ordering::Release);
     let _ = poller.join();
     state.running.store(false, Ordering::Release);
+    state.cancel.lock().unwrap().take();
 
+    let result = task.map_err(|e| e.to_string())?;
     let arena = result.map_err(|e| e.to_string())?;
     let index = ChildIndex::build(&arena);
     let summary = ScanSummary {
@@ -315,7 +316,6 @@ fn node_info(state: State<'_, AppState>, node: NodeId) -> Result<NodeInfo, Strin
     })
 }
 
-/// The `limit` biggest files and packages, largest first.
 #[tauri::command]
 fn largest_files(state: State<'_, AppState>, limit: usize) -> Result<Vec<FileEntry>, String> {
     let guard = state.scan.lock().unwrap();
@@ -333,7 +333,6 @@ fn largest_files(state: State<'_, AppState>, limit: usize) -> Result<Vec<FileEnt
         if f.contains(Flags::TRASHED) || size == 0 {
             continue;
         }
-        // Nothing inside a node is bigger than the node itself.
         if heap.len() == limit && heap.peek().is_some_and(|m| size <= m.0 .0) {
             continue;
         }
@@ -354,7 +353,6 @@ const MIB: u64 = 1024 * 1024;
 const UNDER_HOME: u8 = 1;
 const UNDER_XCODE: u8 = 2;
 
-/// Well-known locations resolved to node ids once per `suggestions` call.
 struct Places {
     home: NodeId,
     xcode: NodeId,
@@ -477,7 +475,6 @@ fn classify(scan: &Scan, p: &Places, id: NodeId, ctx: u8, now: i64) -> Option<(&
     None
 }
 
-/// Cleanup candidates by safety, largest first. Flagged nodes are not descended into.
 #[tauri::command]
 fn suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
     let guard = state.scan.lock().unwrap();
@@ -567,7 +564,6 @@ fn in_trash(a: &Arena, mut id: NodeId) -> bool {
     false
 }
 
-/// Size of each watched folder in the latest scan; `id: None` when it is outside the scan, missing or trashed.
 #[tauri::command]
 fn watch_status(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<WatchHit>, String> {
     let guard = state.scan.lock().unwrap();
@@ -591,6 +587,9 @@ fn reveal(state: State<'_, AppState>, node: NodeId) -> Result<(), String> {
     let path = {
         let guard = state.scan.lock().unwrap();
         let scan = guard.as_ref().ok_or("no scan loaded")?;
+        if (node as usize) >= scan.arena.len() {
+            return Err("unknown node".into());
+        }
         scan.arena.path(node)
     };
     std::process::Command::new("open")
@@ -601,14 +600,13 @@ fn reveal(state: State<'_, AppState>, node: NodeId) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Move nodes to the Trash and subtract them from the tree. Space is only
-/// reclaimed once the Trash is emptied; the UI should say so.
 #[tauri::command]
 fn trash_nodes(state: State<'_, AppState>, nodes: Vec<NodeId>) -> Result<TrashResult, String> {
     let mut guard = state.scan.lock().unwrap();
     let scan = guard.as_mut().ok_or("no scan loaded")?;
-    let mut freed = 0u64;
-    let mut count = 0usize;
+    let mut bytes = 0u64;
+    let mut trashed = Vec::new();
+    let mut failed = Vec::new();
     for id in nodes {
         if (id as usize) >= scan.arena.len() || id == 0 {
             continue;
@@ -620,9 +618,12 @@ fn trash_nodes(state: State<'_, AppState>, nodes: Vec<NodeId>) -> Result<TrashRe
         if !path.starts_with(&scan.root) {
             return Err(format!("refusing to trash {} outside the scan root", path.display()));
         }
-        trash::delete(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        freed += scan.arena.mark_trashed(id);
-        count += 1;
+        if let Err(e) = trash::delete(&path) {
+            failed.push(format!("{}: {e}", path.display()));
+            continue;
+        }
+        bytes += scan.arena.mark_trashed(id);
+        trashed.push(id);
         let parent = scan.arena.parent[id as usize];
         let mut p = parent;
         while p != NONE {
@@ -630,7 +631,7 @@ fn trash_nodes(state: State<'_, AppState>, nodes: Vec<NodeId>) -> Result<TrashRe
             p = scan.arena.parent[p as usize];
         }
     }
-    Ok(TrashResult { freed, count })
+    Ok(TrashResult { bytes, count: trashed.len(), trashed, failed })
 }
 
 #[tauri::command]
@@ -700,4 +701,40 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scan_fixture() -> (Scan, NodeId, NodeId) {
+        let mut arena = Arena::default();
+        let root = arena.push(NONE, b"/tmp/root", 0, 0, Flags::DIR);
+        let folder = arena.push(root, b"folder", 0, 0, Flags::DIR);
+        let file = arena.push(folder, b"file.bin", 10, 0, Flags::empty());
+        arena.aggregate();
+        let index = ChildIndex::build(&arena);
+        (Scan { root: PathBuf::from("/tmp/root"), arena, index }, folder, file)
+    }
+
+    #[test]
+    fn resolves_only_paths_inside_the_scan() {
+        let (scan, folder, file) = scan_fixture();
+
+        assert_eq!(find_node(&scan, Path::new("/tmp/root")), 0);
+        assert_eq!(find_node(&scan, Path::new("/tmp/root/folder")), folder);
+        assert_eq!(find_node(&scan, Path::new("/tmp/root/folder/file.bin")), file);
+        assert_eq!(find_node(&scan, Path::new("/tmp/other")), NONE);
+    }
+
+    #[test]
+    fn treats_descendants_of_trashed_nodes_as_gone() {
+        let (mut scan, folder, file) = scan_fixture();
+
+        assert_eq!(scan.arena.mark_trashed(folder), 10);
+        assert!(in_trash(&scan.arena, folder));
+        assert!(in_trash(&scan.arena, file));
+        assert_eq!(scan.arena.size[0], 0);
+        assert_eq!(scan.arena.items[0], 0);
+    }
 }

@@ -16,9 +16,7 @@ type SunburstProps = {
   onHover: (id: HoverId) => void;
   onDrill: (id: number) => void;
   onUp: () => void;
-  /** Clicking a file arc; directory arcs drill instead. */
   onSelectFile?: (id: number) => void;
-  /** Font size of the centre size label in px. */
   centerSize?: number;
   className?: string;
 };

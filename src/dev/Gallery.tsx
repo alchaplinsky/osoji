@@ -17,14 +17,9 @@ import WatchersPreview from "./previews/WatchersPreview";
 
 const ICON_NAMES: IconName[] = ["logo", "scan", "breakdown", "largest", "suggest", "watch", "settings", "list", "more", "trash", "chevronDown", "chevronRight", "chevronRightSm", "close", "check", "checkLg"];
 
-/**
- * Dev-only showcase, served while `vite` runs:
- * `?gallery` lists every primitive; `?gallery=shell` and `?gallery=breakdown` render screen previews with mock data.
- */
 export default function Gallery({ section }: { section: string }) {
   const { setTheme, setLayout } = useTheme();
 
-  // `?gallery&theme=glass&layout=classic` picks the appearance for screenshots.
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     const t = q.get("theme");
@@ -52,7 +47,6 @@ function Primitives() {
   const [sheet, setSheet] = useState(false);
   const [toast, setToast] = useState(false);
 
-  // `?gallery&open=sheet|toast|menu` opens an overlay for screenshots.
   useEffect(() => {
     const open = new URLSearchParams(location.search).get("open");
     if (open === "sheet") setSheet(true);

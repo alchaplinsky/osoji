@@ -30,7 +30,6 @@ type BreakdownScreenProps = {
   onRescan: () => void;
   onReveal: () => void;
   binItems: BinItem[];
-  /** Ids to show as ticked; defaults to the ids of `binItems`. Lets ticked children of a queued folder stay checked. */
   binIds?: ReadonlySet<number>;
   onToggleBin: (id: number) => void;
   onRemoveFromBin: (id: number) => void;
