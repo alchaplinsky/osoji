@@ -1,3 +1,16 @@
+[workspace]
+resolver = "2"
+members = [".", "crates/scan-core", "crates/scan-macos", "crates/scan-cli"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+
+[profile.release]
+debug = 1
+lto = "thin"
+codegen-units = 1
+
 [package]
 name = "unshift-app"
 edition.workspace = true
@@ -11,8 +24,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-scan-core = { path = "../../crates/scan-core" }
-scan-macos = { path = "../../crates/scan-macos" }
+scan-core = { path = "crates/scan-core" }
+scan-macos = { path = "crates/scan-macos" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }

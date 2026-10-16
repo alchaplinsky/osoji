@@ -2,11 +2,11 @@
 
 ## How to run
 ```
-cargo build --release
-./target/release/scan-cli ~ --walker bulk --threads 8          # human output
-./target/release/scan-cli ~ --walker jwalk --json              # one JSON line
-DUA=/path/to/dua bench/run_home.sh ~ 3 4 8 12                  # harness
-bench/report.py bench/results/<file>.jsonl                     # markdown table
+cargo build --release -p scan-cli --manifest-path src-tauri/Cargo.toml
+src-tauri/target/release/scan-cli ~ --walker bulk --threads 8   # human output
+src-tauri/target/release/scan-cli ~ --walker jwalk --json       # one JSON line
+DUA=/path/to/dua tools/bench/run_home.sh ~ 3 4 8 12             # harness
+tools/bench/report.py tools/bench/results/<file>.jsonl          # markdown table
 ```
 Cold-cache runs need `sudo purge` and are not covered by the harness yet.
 
@@ -17,7 +17,7 @@ Cold-cache runs need `sudo purge` and are not covered by the harness yet.
   after the returned-attrs bitmap, name ref at 28, DEVID 36, OBJTYPE 40,
   MODTIME 44 as a 16-byte timespec, FILEID 60). The dir group is only present
   for directories and the file group only for files. Parse the tail with a
-  cursor driven by the returned-attrs bitmap. See scan-macos/src/lib.rs.
+  cursor driven by the returned-attrs bitmap. See src-tauri/crates/scan-macos/src/lib.rs.
 - **ATTR_DIR_MOUNTSTATUS works in bulk mode** and flags every mount point
   under /System/Volumes, including Data. No fstat per directory is needed to
   stop at mounts.
@@ -107,7 +107,7 @@ the internal NVMe is fast enough that the scan stays mostly CPU bound.
 DaisyDisk's observed 67 s is about twice our cold time; its warm number is
 still unmeasured.
 
-## DaisyDisk 4.34.2 on the same disk, timed externally with bench/time_app_scan.sh
+## DaisyDisk 4.34.2 on the same disk, timed externally with tools/bench/time_app_scan.sh
 | run | elapsed | peak CPU |
 |---|---|---|
 | cold (`sudo purge` first) | 79.0 s | 382% |

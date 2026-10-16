@@ -4,8 +4,8 @@
 # uses >= START_CPU percent, and "ends" after END_SAMPLES consecutive samples
 # below END_CPU percent. Precision is about +/- 1 s.
 #
-#   bench/time_app_scan.sh                 # DaisyDisk (default)
-#   bench/time_app_scan.sh DaisyDisk 30 5  # name, start threshold, end threshold
+#   tools/bench/time_app_scan.sh                 # DaisyDisk (default)
+#   tools/bench/time_app_scan.sh DaisyDisk 30 5  # name, start threshold, end threshold
 #
 # Run it, then click Scan in the app.
 set -u

@@ -1,7 +1,7 @@
 # Benchmark plan
 
 ## Corpus (reproducible)
-- bench/gen_corpus.rs uses a seeded RNG and writes onto a dedicated APFS sparse image (hdiutil create -size 200g -fs APFS -type SPARSE).
+- tools/bench/gen_corpus.rs uses a seeded RNG and writes onto a dedicated APFS sparse image (hdiutil create -size 200g -fs APFS -type SPARSE).
 - About 10M entries in a power-law tree: depth up to 20, with a few directories holding 50k+ entries.
 - File sizes follow a log-normal distribution and are written sparsely, so allocated size differs from logical size.
 - Special cases:
@@ -36,10 +36,10 @@
 - Correctness: totals must match the manifest within 0.1%.
 
 ## Output
-bench/run.sh writes results/<date>-<host>.csv with the columns:
+tools/bench/run.sh writes results/<date>-<host>.csv with the columns:
 contender,condition,threads,metric,median,p90,p99,unit,runs,correct
 
-bench/report.py renders this table:
+tools/bench/report.py renders this table:
 
 | contender | cache | threads | scan s | RSS MB | first pixel ms | view p50/p99 ms | correct |
 |---|---|---|---|---|---|---|---|

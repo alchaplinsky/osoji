@@ -1,2 +1,5 @@
-/target
-/bench/results/*.jsonl
+node_modules
+dist
+/src-tauri/target
+/src-tauri/gen
+/tools/bench/results/*.jsonl
