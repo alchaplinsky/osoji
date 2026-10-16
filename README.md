@@ -17,9 +17,9 @@ docs/                         spec and benchmark plan
 
 ## Run the app
 ```
-pnpm install
-pnpm tauri dev          # dev build with hot reload
-pnpm tauri build        # .app and .dmg under src-tauri/target/release/bundle
+bun install
+bun tauri dev           # dev build with hot reload
+bun tauri build         # .app and .dmg under src-tauri/target/release/bundle
 ```
 
 ## Run the scanner alone
