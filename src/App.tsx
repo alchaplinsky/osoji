@@ -5,11 +5,15 @@ import ReviewSheet from "./components/ReviewSheet";
 import { Toast } from "./components/ui";
 import ScanScreen from "./screens/Scan";
 import BreakdownScreen from "./screens/Breakdown";
+import LargestScreen from "./screens/Largest";
+import SuggestionsScreen from "./screens/Suggestions";
 import SettingsScreen from "./screens/Settings";
 import { useScan } from "./hooks/useScan";
 import { useExplorer } from "./hooks/useExplorer";
+import { useInsights } from "./hooks/useInsights";
 import { useBin } from "./hooks/useBin";
 import { useTheme } from "./hooks/useTheme";
+import { useSettings } from "./hooks/useSettings";
 import { homeDir, reveal, trashNodes, volumeInfo } from "./lib/api";
 import { humanBytes } from "./lib/format";
 import { pathTo } from "./lib/tree";
@@ -17,12 +21,15 @@ import type { BinItem, HoverId, Screen, Volume } from "./lib/types";
 import styles from "./App.module.css";
 
 const TOAST_MS = 4500;
+const BIG_ITEM = 1024 ** 3;
 
 export default function App() {
   const scan = useScan();
   const explorer = useExplorer();
+  const insights = useInsights();
   const bin = useBin();
   const { theme } = useTheme();
+  const { confirmBig } = useSettings();
   const [screen, setScreen] = useState<Screen>("scan");
   const [home, setHome] = useState("");
   const [scanRoot, setScanRoot] = useState("/");
@@ -44,18 +51,20 @@ export default function App() {
   }, [scanRoot]);
 
   const { load, reset } = explorer;
+  const { load: loadInsights, reset: resetInsights } = insights;
   const { clear: clearBin } = bin;
   useEffect(() => {
     if (scan.status === "scanning") {
       reset();
+      resetInsights();
       clearBin();
     }
     if (scan.status === "done") {
-      load(0)
+      Promise.all([load(0), loadInsights()])
         .then(() => setScreen("breakdown"))
         .catch(console.error);
     }
-  }, [scan.status, load, reset, clearBin]);
+  }, [scan.status, load, reset, loadInsights, resetInsights, clearBin]);
 
   const pickRoot = useCallback(
     async (choice: "disk" | "home" | "folder") => {
@@ -99,7 +108,7 @@ export default function App() {
     };
   };
 
-  const toggleBin = (id: number) => {
+  const toggleBinById = (id: number) => {
     const item = describe(id);
     if (item) bin.toggle(item);
   };
@@ -119,7 +128,7 @@ export default function App() {
       // If the current folder (or one of its ancestors) was trashed, step up to the nearest surviving parent.
       const here = [explorer.currentId, ...(explorer.info?.ancestors.map((a) => a.id) ?? [])];
       const trashedHere = bin.items.find((i) => here.includes(i.id));
-      await explorer.refresh(trashedHere ? (trashedHere.ancestors.at(-1) ?? 0) : explorer.currentId);
+      await Promise.all([explorer.refresh(trashedHere ? (trashedHere.ancestors.at(-1) ?? 0) : explorer.currentId), insights.load()]);
       bin.clear();
       setReview(false);
       setHoverId(null);
@@ -132,8 +141,18 @@ export default function App() {
     }
   };
 
-  const canShow = (s: Screen) => s === "scan" || s === "settings" || (s === "breakdown" && scanned);
+  const bigCount = confirmBig ? bin.items.filter((i) => i.size >= BIG_ITEM).length : 0;
+  const warning = bigCount > 0 ? `${bigCount === 1 ? "1 item is" : `${bigCount} items are`} over 1 GB. Double-check before you continue.` : undefined;
+
+  const canShow = (s: Screen) => s === "scan" || s === "settings" || scanned;
   const active = canShow(screen) ? screen : "scan";
+
+  const binProps = {
+    binItems: bin.items,
+    binIds: bin.ids,
+    onRemoveFromBin: bin.remove,
+    onReview: () => setReview(true),
+  };
 
   return (
     <div className={styles.app}>
@@ -143,6 +162,7 @@ export default function App() {
         onPickRoot={pickRoot}
         scanned={scanned}
         screen={active}
+        suggestBadge={scanned && insights.safeTotal > 0 ? humanBytes(insights.safeTotal) : undefined}
         onNavigate={(s) => {
           setHoverId(null);
           setScreen(s);
@@ -179,11 +199,26 @@ export default function App() {
             onToggleList={() => setListOpen((o) => !o)}
             onRescan={startScan}
             onReveal={() => reveal(explorer.currentId).catch(console.error)}
-            binItems={bin.items}
-            binIds={bin.ids}
-            onToggleBin={toggleBin}
-            onRemoveFromBin={bin.remove}
-            onReview={() => setReview(true)}
+            onToggleBin={toggleBinById}
+            {...binProps}
+          />
+        )}
+        {active === "largest" && (
+          <LargestScreen
+            entries={insights.largest}
+            safeIds={insights.safeIds}
+            onToggleBin={bin.toggle}
+            onReveal={(id) => reveal(id).catch(console.error)}
+            {...binProps}
+          />
+        )}
+        {active === "suggest" && (
+          <SuggestionsScreen
+            suggestions={insights.suggestions}
+            onToggleBin={bin.toggle}
+            onAddAll={(items) => items.forEach(bin.add)}
+            onRemoveMany={(ids) => ids.forEach(bin.remove)}
+            {...binProps}
           />
         )}
         {active === "settings" && <SettingsScreen />}
@@ -195,6 +230,7 @@ export default function App() {
         volumeName={volume?.name ?? "this disk"}
         busy={sweeping}
         error={sweepError}
+        warning={warning}
         onCancel={() => {
           setReview(false);
           setSweepError(null);

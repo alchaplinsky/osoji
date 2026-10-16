@@ -10,6 +10,9 @@ import {
 import ShellPreview from "./previews/ShellPreview";
 import BreakdownPreview from "./previews/BreakdownPreview";
 import ReviewPreview from "./previews/ReviewPreview";
+import LargestPreview from "./previews/LargestPreview";
+import SuggestionsPreview from "./previews/SuggestionsPreview";
+import SettingsPreview from "./previews/SettingsPreview";
 
 const ICON_NAMES: IconName[] = ["logo", "scan", "breakdown", "largest", "suggest", "watch", "settings", "list", "more", "trash", "chevronDown", "chevronRight", "chevronRightSm", "close", "check", "checkLg"];
 
@@ -32,6 +35,9 @@ export default function Gallery({ section }: { section: string }) {
   if (section === "shell") return <ShellPreview />;
   if (section === "breakdown") return <BreakdownPreview />;
   if (section === "review") return <ReviewPreview />;
+  if (section === "largest") return <LargestPreview />;
+  if (section === "suggestions") return <SuggestionsPreview />;
+  if (section === "settings") return <SettingsPreview />;
   return <Primitives />;
 }
 

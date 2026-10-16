@@ -11,6 +11,7 @@
   transition: background .25s;
 }
 .on { background: var(--ac); }
+.track:disabled { cursor: default; opacity: .6; }
 .knob {
   position: absolute;
   top: 2px;

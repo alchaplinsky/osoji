@@ -8,3 +8,10 @@ export type HoverId = number | "other" | null;
 
 /** A node queued for removal. `ancestors` are node ids from the scan root down to the parent. */
 export type BinItem = { id: number; name: string; path: string; size: number; dir: boolean; ancestors: number[] };
+
+/** A node returned by a cleanup query. `mtime` is Unix seconds; `ancestors` as in BinItem. */
+export type FileEntry = { id: number; name: string; path: string; size: number; mtime: number; dir: boolean; ancestors: number[] };
+
+export type Safety = "safe" | "review" | "keep";
+
+export type Suggestion = FileEntry & { safety: Safety; reason: string };

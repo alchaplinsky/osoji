@@ -7,11 +7,14 @@ import "./design/themes.css";
 import App from "./App";
 import Gallery from "./dev/Gallery";
 import { ThemeProvider } from "./hooks/useTheme";
+import { SettingsProvider } from "./hooks/useSettings";
 
 const gallery = new URLSearchParams(location.search).get("gallery");
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <ThemeProvider>{gallery === null ? <App /> : <Gallery section={gallery} />}</ThemeProvider>
+    <ThemeProvider>
+      <SettingsProvider>{gallery === null ? <App /> : <Gallery section={gallery} />}</SettingsProvider>
+    </ThemeProvider>
   </React.StrictMode>,
 );

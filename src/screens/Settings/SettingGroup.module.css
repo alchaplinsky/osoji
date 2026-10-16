@@ -1,0 +1,28 @@
+.heading { margin-bottom: 10px; }
+
+.group { overflow: hidden; }
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 16px;
+  cursor: pointer;
+}
+.row + .row { border-top: 1px solid var(--line); }
+.row:hover { background: var(--card2); }
+
+.locked { cursor: default; }
+
+.text {
+  flex: 1;
+  min-width: 0;
+}
+
+.label { font-weight: 600; }
+
+.desc {
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--fg2);
+}

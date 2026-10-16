@@ -15,11 +15,13 @@ type BinBarProps = {
   onReview: () => void;
   /** The list panel is hidden, so the bar may grow wider. */
   wide: boolean;
+  /** Overlays the bottom of a full-screen list (Largest files, Suggestions) instead of the viz column. */
+  floating?: boolean;
 };
 
 const VISIBLE_CHIPS = 3;
 
-export default function BinBar({ items, onRemove, onDrop, onReview, wide }: BinBarProps) {
+export default function BinBar({ items, onRemove, onDrop, onReview, wide, floating }: BinBarProps) {
   const [over, setOver] = useState(false);
   const empty = items.length === 0;
   const total = items.reduce((sum, item) => sum + item.size, 0);
@@ -43,7 +45,7 @@ export default function BinBar({ items, onRemove, onDrop, onReview, wide }: BinB
 
   return (
     <div
-      className={cx(styles.bar, !empty && styles.filled, over && styles.over)}
+      className={cx(styles.bar, floating && styles.floating, !empty && styles.filled, over && styles.over)}
       style={{ width }}
       onDragOver={dragOver}
       onDragLeave={dragLeave}

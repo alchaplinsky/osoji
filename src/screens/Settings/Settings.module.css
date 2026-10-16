@@ -18,10 +18,19 @@
 
 .heading { margin-bottom: 10px; }
 
-.themes {
+.themes,
+.grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+.extHeading { margin-bottom: 4px; }
+
+.intro {
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--fg2);
 }
 
 .footer {

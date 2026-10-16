@@ -12,11 +12,12 @@ type ReviewSheetProps = {
   volumeName: string;
   busy: boolean;
   error: string | null;
+  warning?: string;
   onCancel: () => void;
   onConfirm: () => void;
 };
 
-export default function ReviewSheet({ open, items, volumeName, busy, error, onCancel, onConfirm }: ReviewSheetProps) {
+export default function ReviewSheet({ open, items, volumeName, busy, error, warning, onCancel, onConfirm }: ReviewSheetProps) {
   const total = humanBytes(items.reduce((sum, b) => sum + b.size, 0));
   const close = useCallback(() => {
     if (!busy) onCancel();
@@ -40,7 +41,7 @@ export default function ReviewSheet({ open, items, volumeName, busy, error, onCa
             </div>
           )}
           <div className={styles.actions}>
-            {error && <div className={styles.error}>{error}</div>}
+            {error ? <div className={styles.error}>{error}</div> : warning && <div className={styles.warning}>{warning}</div>}
             <Button size="lg" onClick={onCancel} disabled={busy}>Cancel</Button>
             <Button variant="primary" size="lg" onClick={onConfirm} disabled={busy}>
               {busy ? "Sweeping…" : `Move ${total} to Trash`}

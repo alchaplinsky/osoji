@@ -14,22 +14,17 @@ type SidebarProps = {
   scanned: boolean;
   screen: Screen;
   onNavigate: (s: Screen) => void;
+  /** Shown next to Suggestions once scanned, e.g. the reclaimable size. */
+  suggestBadge?: string;
 };
 
-const COMING_SOON: ReadonlySet<Screen> = new Set(["largest", "suggest"]);
-
-export default function Sidebar({ volume, scanRoot, onPickRoot, scanned, screen, onNavigate }: SidebarProps) {
+export default function Sidebar({ volume, scanRoot, onPickRoot, scanned, screen, onNavigate, suggestBadge }: SidebarProps) {
   const item = (target: Screen) => {
-    const soon = COMING_SOON.has(target);
     const locked = target !== "scan" && target !== "settings" && !scanned;
     return {
       active: screen === target,
-      disabled: locked || soon,
-      title: soon ? "Coming soon" : undefined,
-      onClick: () => {
-        if (locked) onNavigate("scan");
-        else if (!soon) onNavigate(target);
-      },
+      disabled: locked,
+      onClick: () => onNavigate(locked ? "scan" : target),
     };
   };
 
@@ -52,7 +47,7 @@ export default function Sidebar({ volume, scanRoot, onPickRoot, scanned, screen,
       <NavSection title="Clean up">
         <NavItem icon="breakdown" label="Breakdown" {...item("breakdown")} />
         <NavItem icon="largest" label="Largest files" {...item("largest")} />
-        <NavItem icon="suggest" label="Suggestions" {...item("suggest")} />
+        <NavItem icon="suggest" label="Suggestions" badge={scanned ? suggestBadge : undefined} {...item("suggest")} />
       </NavSection>
 
       <div className={styles.spacer} />

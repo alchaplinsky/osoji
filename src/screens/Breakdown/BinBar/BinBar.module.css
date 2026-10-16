@@ -16,6 +16,11 @@
   backdrop-filter: blur(var(--blur));
   transition: border-color .25s, background .25s, box-shadow .3s, width .4s var(--ease-spring-soft);
 }
+.floating {
+  bottom: 10px;
+  max-width: calc(100% - 20px);
+  z-index: 5;
+}
 .filled { border: 1px solid var(--line); }
 .over {
   border: 1px solid var(--ac);

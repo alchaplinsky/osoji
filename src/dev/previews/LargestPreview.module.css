@@ -1,0 +1,18 @@
+.frame {
+  display: flex;
+  gap: var(--pad);
+  height: 100vh;
+  padding: var(--pad);
+}
+
+.sidebar {
+  width: 206px;
+  flex: none;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}

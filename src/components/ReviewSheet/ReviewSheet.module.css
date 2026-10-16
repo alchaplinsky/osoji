@@ -79,4 +79,5 @@
   gap: 8px;
 }
 
-.error { flex: 1; font-size: 12px; color: var(--review); }
+.error,
+.warning { flex: 1; font-size: 12px; color: var(--review); }

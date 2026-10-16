@@ -3,6 +3,9 @@
 
 use scan_core::{Arena, Cancel, ChildIndex, Flags, NodeId, Progress, ScanConfig, NONE};
 use serde::Serialize;
+use std::borrow::Cow;
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::ffi::{CStr, CString};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -83,8 +86,89 @@ struct TrashResult {
     count: usize,
 }
 
+#[derive(Serialize)]
+struct FileEntry {
+    id: NodeId,
+    name: String,
+    path: String,
+    size: u64,
+    mtime: i64,
+    dir: bool,
+    ancestors: Vec<NodeId>,
+}
+
+#[derive(Serialize)]
+struct Suggestion {
+    #[serde(flatten)]
+    entry: FileEntry,
+    safety: &'static str,
+    reason: String,
+}
+
 fn name_of(arena: &Arena, id: NodeId) -> String {
     String::from_utf8_lossy(arena.name(id)).into_owned()
+}
+
+/// Node ids from the root down to the parent of `id`.
+fn ancestors_of(arena: &Arena, id: NodeId) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    let mut p = arena.parent[id as usize];
+    while p != NONE {
+        out.push(p);
+        p = arena.parent[p as usize];
+    }
+    out.reverse();
+    out
+}
+
+fn file_entry(arena: &Arena, id: NodeId) -> FileEntry {
+    let i = id as usize;
+    FileEntry {
+        id,
+        name: name_of(arena, id),
+        path: arena.path(id).to_string_lossy().into_owned(),
+        size: arena.size[i],
+        mtime: arena.mtime[i],
+        dir: arena.flags[i].contains(Flags::DIR),
+        ancestors: ancestors_of(arena, id),
+    }
+}
+
+/// Directories macOS shows as a single file. Treated as one item, never descended into.
+const PACKAGE_SUFFIXES: [&[u8]; 11] = [
+    b".app",
+    b".photoslibrary",
+    b".musiclibrary",
+    b".fcpbundle",
+    b".imovielibrary",
+    b".pvm",
+    b".vmwarevm",
+    b".logicx",
+    b".bundle",
+    b".framework",
+    b".xcarchive",
+];
+
+fn is_package(arena: &Arena, id: NodeId) -> bool {
+    let name = arena.name(id);
+    PACKAGE_SUFFIXES.iter().any(|s| name.ends_with(s))
+}
+
+/// Resolve an absolute path to a node of the scan, or NONE when it is outside the scan or missing.
+fn find_node(scan: &Scan, path: &Path) -> NodeId {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(rest) = path.strip_prefix(&scan.root) else {
+        return NONE;
+    };
+    let mut id: NodeId = 0;
+    for part in rest.components() {
+        let name = part.as_os_str().as_bytes();
+        match scan.index.children(id).iter().find(|&&c| scan.arena.name(c) == name) {
+            Some(&c) => id = c,
+            None => return NONE,
+        }
+    }
+    id
 }
 
 #[tauri::command]
@@ -215,13 +299,7 @@ fn node_info(state: State<'_, AppState>, node: NodeId) -> Result<NodeInfo, Strin
     if (node as usize) >= a.len() {
         return Err("unknown node".into());
     }
-    let mut ancestors = Vec::new();
-    let mut p = a.parent[node as usize];
-    while p != NONE {
-        ancestors.push(Crumb { id: p, name: name_of(a, p) });
-        p = a.parent[p as usize];
-    }
-    ancestors.reverse();
+    let ancestors = ancestors_of(a, node).into_iter().map(|id| Crumb { id, name: name_of(a, id) }).collect();
     let f = a.flags[node as usize];
     Ok(NodeInfo {
         id: node,
@@ -235,6 +313,240 @@ fn node_info(state: State<'_, AppState>, node: NodeId) -> Result<NodeInfo, Strin
         mtime: a.mtime[node as usize],
         ancestors,
     })
+}
+
+/// The `limit` biggest files and packages, largest first.
+#[tauri::command]
+fn largest_files(state: State<'_, AppState>, limit: usize) -> Result<Vec<FileEntry>, String> {
+    let guard = state.scan.lock().unwrap();
+    let scan = guard.as_ref().ok_or("no scan loaded")?;
+    let a = &scan.arena;
+    if limit == 0 || a.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut heap: BinaryHeap<Reverse<(u64, NodeId)>> = BinaryHeap::with_capacity(limit + 1);
+    let mut stack: Vec<NodeId> = vec![0];
+    while let Some(id) = stack.pop() {
+        let i = id as usize;
+        let f = a.flags[i];
+        let size = a.size[i];
+        if f.contains(Flags::TRASHED) || size == 0 {
+            continue;
+        }
+        // Nothing inside a node is bigger than the node itself.
+        if heap.len() == limit && heap.peek().is_some_and(|m| size <= m.0 .0) {
+            continue;
+        }
+        if !f.contains(Flags::DIR) || (id != 0 && is_package(a, id)) {
+            heap.push(Reverse((size, id)));
+            if heap.len() > limit {
+                heap.pop();
+            }
+            continue;
+        }
+        stack.extend(scan.index.children(id).iter().rev());
+    }
+    Ok(heap.into_sorted_vec().into_iter().map(|Reverse((_, id))| file_entry(a, id)).collect())
+}
+
+const DAY: i64 = 86_400;
+const MIB: u64 = 1024 * 1024;
+const UNDER_HOME: u8 = 1;
+const UNDER_XCODE: u8 = 2;
+
+/// Well-known locations resolved to node ids once per `suggestions` call.
+struct Places {
+    home: NodeId,
+    xcode: NodeId,
+    caches: NodeId,
+    sim_caches: NodeId,
+    downloads: NodeId,
+    var_folders: NodeId,
+    var_vm: NodeId,
+    system: NodeId,
+}
+
+const PACKAGE_CACHE: &str = "Package manager cache. Downloaded again when needed.";
+
+fn parent_named(a: &Arena, id: NodeId, name: &[u8]) -> NodeId {
+    let p = a.parent[id as usize];
+    if p != NONE && a.name(p) == name {
+        p
+    } else {
+        NONE
+    }
+}
+
+fn has_child(scan: &Scan, id: NodeId, name: &[u8]) -> bool {
+    scan.index.children(id).iter().any(|&c| scan.arena.name(c) == name)
+}
+
+fn plural(n: i64, unit: &str) -> String {
+    if n == 1 {
+        format!("1 {unit}")
+    } else {
+        format!("{n} {unit}s")
+    }
+}
+
+fn span(days: i64) -> String {
+    if days < 60 {
+        plural(days, "day")
+    } else if days < 365 {
+        plural(days / 30, "month")
+    } else {
+        plural(days / 365, "year")
+    }
+}
+
+fn is_package_cache(a: &Arena, p: &Places, id: NodeId, ctx: u8) -> bool {
+    match a.name(id) {
+        b".gradle" => ctx & UNDER_HOME != 0,
+        b".cache" => p.home != NONE && a.parent[id as usize] == p.home,
+        b"_cacache" => parent_named(a, id, b".npm") != NONE,
+        b"cache" => {
+            let reg = parent_named(a, id, b"registry");
+            let inst = parent_named(a, id, b"install");
+            (reg != NONE && parent_named(a, reg, b".cargo") != NONE)
+                || (inst != NONE && parent_named(a, inst, b".bun") != NONE)
+        }
+        _ => false,
+    }
+}
+
+fn classify(scan: &Scan, p: &Places, id: NodeId, ctx: u8, now: i64) -> Option<(&'static str, Cow<'static, str>)> {
+    let a = &scan.arena;
+    let i = id as usize;
+    let dir = a.flags[i].contains(Flags::DIR);
+    let name = a.name(id);
+    let parent = a.parent[i];
+    let rule = |safety, reason: &'static str| Some((safety, Cow::Borrowed(reason)));
+
+    if dir && name.ends_with(b".photoslibrary") {
+        return rule("keep", "Your photos. Unshift never suggests removing these.");
+    }
+    if id == p.var_vm {
+        return rule("keep", "Swap files. macOS manages these itself.");
+    }
+    if id == p.system {
+        return rule("keep", "Protected by macOS and cannot be changed.");
+    }
+    if dir {
+        if name == b"node_modules" {
+            return rule("safe", "Installed packages. Reinstalled by npm, pnpm or bun the next time you run install.");
+        }
+        if name == b"target" && parent != NONE && has_child(scan, parent, b"Cargo.toml") {
+            return rule("safe", "Rust build output. Rebuilt by cargo.");
+        }
+        if ctx & UNDER_XCODE != 0 && name == b"DerivedData" {
+            return rule("safe", "Build leftovers. Xcode recreates them the next time you open a project.");
+        }
+        if ctx & UNDER_XCODE != 0 && name == b"iOS DeviceSupport" {
+            return rule("safe", "Debug files for devices you may no longer connect. Xcode re-downloads them if needed.");
+        }
+        if id == p.caches {
+            return rule("safe", "Apps rebuild their caches automatically. They may open a little slower the first time after.");
+        }
+        if id == p.sim_caches {
+            return rule("safe", "Simulator caches. Rebuilt on demand.");
+        }
+        if is_package_cache(a, p, id, ctx) {
+            return rule("safe", PACKAGE_CACHE);
+        }
+        if id == p.var_folders {
+            return rule("safe", "Temporary files macOS clears on restart.");
+        }
+        if name.ends_with(b".pvm") || name.ends_with(b".vmwarevm") {
+            return rule("review", "A virtual machine. Remove only if you no longer need it.");
+        }
+    }
+    if name == b"Docker.raw" {
+        return rule("review", "Docker's disk image. Prune images and containers from Docker instead of removing it.");
+    }
+    let mtime = a.mtime[i];
+    if mtime <= 0 {
+        return None;
+    }
+    let days = (now - mtime) / DAY;
+    if p.downloads != NONE && parent == p.downloads && days > 90 {
+        return Some(("review", Cow::Owned(format!("In Downloads for {}, and probably already used.", span(days)))));
+    }
+    if !dir && a.size[i] >= 500 * MIB && days > 180 {
+        return Some(("review", Cow::Owned(format!("Large file not modified in {}.", span(days)))));
+    }
+    None
+}
+
+/// Cleanup candidates by safety, largest first. Flagged nodes are not descended into.
+#[tauri::command]
+fn suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
+    let guard = state.scan.lock().unwrap();
+    let scan = guard.as_ref().ok_or("no scan loaded")?;
+    let a = &scan.arena;
+    if a.is_empty() {
+        return Ok(Vec::new());
+    }
+    let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
+    let has_home = home.is_absolute();
+    let at = |rel: &str| if has_home { find_node(scan, &home.join(rel)) } else { NONE };
+    let xcode_path = home.join("Library/Developer/Xcode");
+    let from_slash = scan.root == Path::new("/");
+    let places = Places {
+        home: if has_home { find_node(scan, &home) } else { NONE },
+        xcode: at("Library/Developer/Xcode"),
+        caches: at("Library/Caches"),
+        sim_caches: at("Library/Developer/CoreSimulator/Caches"),
+        downloads: at("Downloads"),
+        var_folders: if from_slash { find_node(scan, Path::new("/private/var/folders")) } else { NONE },
+        var_vm: find_node(scan, Path::new("/private/var/vm")),
+        system: find_node(scan, Path::new("/System")),
+    };
+    // A scan rooted inside home (or Xcode) never contains the home node itself.
+    let mut root_ctx = 0;
+    if has_home && scan.root.starts_with(&home) {
+        root_ctx |= UNDER_HOME;
+    }
+    if has_home && scan.root.starts_with(&xcode_path) {
+        root_ctx |= UNDER_XCODE;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+
+    let mut found: Vec<(u64, NodeId, &'static str, Cow<'static, str>)> = Vec::new();
+    let mut stack: Vec<(NodeId, u8)> = vec![(0, root_ctx)];
+    while let Some((id, ctx)) = stack.pop() {
+        let i = id as usize;
+        let f = a.flags[i];
+        if f.contains(Flags::TRASHED) {
+            continue;
+        }
+        if id != 0 {
+            if let Some((safety, reason)) = classify(scan, &places, id, ctx, now) {
+                if a.size[i] > 0 {
+                    found.push((a.size[i], id, safety, reason));
+                }
+                continue;
+            }
+            if !f.contains(Flags::DIR) || is_package(a, id) {
+                continue;
+            }
+        }
+        let mut child_ctx = ctx;
+        if id == places.home {
+            child_ctx |= UNDER_HOME;
+        }
+        if id == places.xcode {
+            child_ctx |= UNDER_XCODE;
+        }
+        stack.extend(scan.index.children(id).iter().map(|&c| (c, child_ctx)));
+    }
+    found.sort_unstable_by(|x, y| y.0.cmp(&x.0));
+    found.truncate(200);
+    Ok(found
+        .into_iter()
+        .map(|(_, id, safety, reason)| Suggestion { entry: file_entry(a, id), safety, reason: reason.into_owned() })
+        .collect())
 }
 
 #[tauri::command]
@@ -341,6 +653,8 @@ pub fn run() {
             cancel_scan,
             get_view,
             node_info,
+            largest_files,
+            suggestions,
             reveal,
             trash_nodes,
             home_dir,
