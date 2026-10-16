@@ -1,0 +1,36 @@
+.badge {
+  display: inline-block;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+  line-height: 1.45;
+}
+
+.tint {
+  --c: var(--fg3);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  color: var(--c);
+  background: color-mix(in srgb, var(--c) 16%, transparent);
+}
+
+.outline {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  color: var(--fg3);
+  border: 1px solid var(--line2);
+  letter-spacing: .04em;
+}
+
+.count {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 1px 7px;
+  color: var(--fg2);
+  background: var(--line);
+}
+
+.safe { --c: var(--safe); }
+.review { --c: var(--review); }
+.keep { --c: var(--keep); }

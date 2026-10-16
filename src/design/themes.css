@@ -1,0 +1,121 @@
+/* Colour themes and surface layouts. Switched with data-theme / data-layout on <html>;
+   see theme.ts for the names and useTheme for the React side. */
+
+:root, [data-theme="instrument"] {
+  color-scheme: dark;
+  --desk: #050506;
+  --bg: #0C0C0E;
+  --bgimg: none;
+  --side: rgba(255, 255, 255, .03);
+  --card: #141416;
+  --card2: #1C1C1F;
+  --line: rgba(255, 255, 255, .08);
+  --line2: rgba(255, 255, 255, .16);
+  --fg: #F2EFE9;
+  --fg2: #A6A299;
+  --fg3: #6F6B63;
+  --ac: #E0A458;
+  --acfg: #1A1206;
+  --acsoft: rgba(224, 164, 88, .14);
+  --blur: 0px;
+  --shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+  --tilefg: #16120B;
+  --safe: #86C08F;
+  --review: #E0A458;
+  --keep: #8A867E;
+}
+
+[data-theme="glass"] {
+  color-scheme: dark;
+  --desk: #060C14;
+  --bg: #0B1520;
+  --bgimg:
+    radial-gradient(760px 520px at 12% -5%, rgba(34, 118, 172, .42), transparent 62%),
+    radial-gradient(520px 420px at 60% 110%, rgba(32, 140, 150, .18), transparent 60%),
+    radial-gradient(680px 540px at 98% 100%, rgba(196, 112, 62, .22), transparent 60%);
+  --side: rgba(255, 255, 255, .055);
+  --card: rgba(255, 255, 255, .065);
+  --card2: rgba(255, 255, 255, .11);
+  --line: rgba(255, 255, 255, .1);
+  --line2: rgba(255, 255, 255, .2);
+  --fg: #EDF3F8;
+  --fg2: #A6B6C6;
+  --fg3: #71818F;
+  --ac: #DB9163;
+  --acfg: #1C0F07;
+  --acsoft: rgba(219, 145, 99, .14);
+  --blur: 28px;
+  --shadow: 0 20px 50px rgba(0, 0, 0, .32), inset 0 1px 0 rgba(255, 255, 255, .1);
+  --tilefg: #1A0F08;
+  --safe: #7FC9A8;
+  --review: #DB9163;
+  --keep: #8E9E9A;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --desk: #E7E2D9;
+  --bg: #F4F0E9;
+  --bgimg: none;
+  --side: rgba(255, 255, 255, .62);
+  --card: #FFFFFF;
+  --card2: #F6F2EB;
+  --line: rgba(30, 24, 18, .08);
+  --line2: rgba(30, 24, 18, .16);
+  --fg: #1C1915;
+  --fg2: #6F685D;
+  --fg3: #A49C90;
+  --ac: #E8603C;
+  --acfg: #FFFFFF;
+  --acsoft: rgba(232, 96, 60, .14);
+  --blur: 20px;
+  --shadow: 0 10px 30px rgba(40, 30, 20, .08), 0 1px 2px rgba(40, 30, 20, .05);
+  --tilefg: #2A1510;
+  --safe: #3E9D6A;
+  --review: #D9822B;
+  --keep: #A49C90;
+}
+
+/* Surface layouts */
+
+:root, [data-layout="cards"] {
+  --pad: 10px;
+  --side-pad: 14px 10px 10px;
+  --side-r: 14px;
+  --side-bd: var(--line);
+  --side-sh: var(--shadow);
+  --panel-bg: var(--card);
+  --panel-bd: var(--line);
+  --panel-bd-b: var(--line);
+  --panel-r: 14px;
+  --panel-sh: var(--shadow);
+  --divider: transparent;
+  --px: 6px;
+  --bar-h: 44px;
+  --gap1: 6px;
+  --gap2: 12px;
+  --body-gap: 14px;
+  --viz-pad: 0px;
+  --item-bg: var(--card);
+}
+
+[data-layout="classic"] {
+  --pad: 0px;
+  --side-pad: 16px 10px 12px;
+  --side-r: 0px;
+  --side-bd: transparent;
+  --side-sh: inset -1px 0 0 var(--line);
+  --panel-bg: transparent;
+  --panel-bd: transparent;
+  --panel-bd-b: var(--line);
+  --panel-r: 0px;
+  --panel-sh: none;
+  --divider: var(--line);
+  --px: 20px;
+  --bar-h: 52px;
+  --gap1: 0px;
+  --gap2: 0px;
+  --body-gap: 0px;
+  --viz-pad: 14px;
+  --item-bg: transparent;
+}

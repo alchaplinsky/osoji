@@ -1,0 +1,13 @@
+.track {
+  height: var(--h);
+  border-radius: calc(var(--h) / 2);
+  background: var(--line);
+  overflow: hidden;
+}
+.fill {
+  height: 100%;
+  width: var(--w);
+  background: var(--fill);
+  border-radius: inherit;
+  transition: width .6s var(--ease-out), background .4s;
+}

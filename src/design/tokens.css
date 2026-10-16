@@ -1,0 +1,55 @@
+/* Theme-independent design tokens, keyframes and global base styles.
+   Colours and surface layout live in themes.css. */
+
+:root {
+  --font-ui: "Hanken Grotesk Variable", -apple-system, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --radius-xs: 5px;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-2xl: 16px;
+  --radius-3xl: 20px;
+  --radius-pill: 999px;
+
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --ease-spring-soft: cubic-bezier(.34, 1.3, .64, 1);
+  --ease-spring: cubic-bezier(.34, 1.4, .64, 1);
+  --ease-spring-hard: cubic-bezier(.34, 1.5, .64, 1);
+
+  --shadow-hero: 0 14px 34px rgba(0, 0, 0, .28);
+  --shadow-float: 0 20px 50px rgba(0, 0, 0, .45);
+  --shadow-sheet: 0 40px 100px rgba(0, 0, 0, .6);
+  --shadow-knob: 0 1px 3px rgba(0, 0, 0, .35);
+  --overlay: rgba(0, 0, 0, .45);
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spinRev { to { transform: rotate(-360deg); } }
+@keyframes springIn { from { opacity: 0; transform: translateY(12px) scale(.975); } to { opacity: 1; transform: none; } }
+@keyframes popIn { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sheetIn { from { opacity: 0; transform: translateY(18px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes toastIn { from { opacity: 0; transform: translate(-50%, 14px) scale(.96); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes breathe { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+@keyframes ringIn { from { stroke-dashoffset: 653.5; } to { stroke-dashoffset: 0; } }
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--bgimg), var(--bg);
+  color: var(--fg);
+  font: 13px/1.45 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background .4s;
+}
+a { color: var(--ac); }
+a:hover { opacity: .8; }
+button, input { font-family: inherit; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(128, 128, 128, .25); border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }

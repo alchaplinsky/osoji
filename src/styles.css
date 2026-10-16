@@ -1,36 +1,17 @@
+/* Styles for the pre-design-system screens, mapped onto the new tokens.
+   Each rule goes away as its screen is rebuilt on src/components/ui. */
 :root {
-  --bg: #f5f5f7;
-  --panel: #ffffff;
-  --border: #d9d9de;
-  --text: #1d1d1f;
-  --muted: #6e6e73;
-  --accent: #0a84ff;
-  --danger: #ff453a;
-  --hole: #ffffff;
-  color-scheme: light dark;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1c1c1e;
-    --panel: #2c2c2e;
-    --border: #3a3a3c;
-    --text: #f5f5f7;
-    --muted: #98989d;
-    --hole: #2c2c2e;
-  }
-}
-* { box-sizing: border-box; }
-html, body, #root { height: 100%; margin: 0; }
-body {
-  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
-  color: var(--text);
-  background: var(--bg);
-  user-select: none;
-  -webkit-user-select: none;
+  --panel: var(--card);
+  --border: var(--line);
+  --text: var(--fg);
+  --muted: var(--fg2);
+  --accent: var(--ac);
+  --danger: var(--review);
+  --hole: var(--card);
 }
 .app { display: grid; grid-template-columns: 320px 1fr; height: 100%; }
 .sidebar {
-  background: var(--panel);
+  background: var(--side);
   border-right: 1px solid var(--border);
   padding: 44px 16px 16px; /* room for the traffic lights */
   display: flex; flex-direction: column; gap: 16px; overflow: auto;
@@ -46,18 +27,18 @@ input[type=text] {
   flex: 1; min-width: 0; padding: 6px 8px; border-radius: 6px;
   border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit;
 }
-button {
+.sidebar button, .crumbs button {
   padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
   background: var(--panel); color: var(--text); font: inherit; cursor: pointer;
 }
-button:hover { border-color: var(--accent); }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.sidebar button:hover, .crumbs button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--acfg); }
 button.danger { color: var(--danger); }
 button:disabled { opacity: .5; cursor: default; }
 .stat { display: flex; justify-content: space-between; }
 .stat b { font-variant-numeric: tabular-nums; }
 .muted { color: var(--muted); }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; user-select: text; -webkit-user-select: text; }
+.mono { font-family: var(--font-mono); font-size: 12px; word-break: break-all; user-select: text; -webkit-user-select: text; }
 .progress { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
 .progress > div { height: 100%; width: 40%; background: var(--accent); animation: slide 1.2s infinite linear; }
 @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(350%); } }

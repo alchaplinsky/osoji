@@ -1,0 +1,19 @@
+.eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--fg3);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Large numerals: hero ring, capacity, sunburst centre. */
+.numeral {
+  font-weight: 500;
+  letter-spacing: -.05em;
+  line-height: 1;
+}
