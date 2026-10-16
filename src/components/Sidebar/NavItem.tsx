@@ -6,7 +6,6 @@ type NavItemProps = {
   icon: IconName;
   label: ReactNode;
   active?: boolean;
-  /** Dimmed, but still clickable so the owner can redirect (e.g. to the Scan screen). */
   disabled?: boolean;
   badge?: ReactNode;
   title?: string;

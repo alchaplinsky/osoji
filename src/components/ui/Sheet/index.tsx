@@ -10,7 +10,6 @@ type Props = {
   children: ReactNode;
 };
 
-/** Centred modal over a blurred backdrop. Click outside or press Escape to close. */
 export default function Sheet({ open, onClose, title, sub, footer, children }: Props) {
   useEffect(() => {
     if (!open) return;

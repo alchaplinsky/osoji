@@ -10,12 +10,9 @@ const C_OUTER = 2 * Math.PI * R_OUTER;
 const C_INNER = 2 * Math.PI * R_INNER;
 
 type ScanRingProps = {
-  /** 0 to 1; the share of the volume in use. */
   used: number;
-  /** Shows the indeterminate inner arc and dims the used arc. */
   scanning: boolean;
   value: ReactNode;
-  /** Font size of the centre value in px. */
   valueSize?: number;
   label: ReactNode;
 };
