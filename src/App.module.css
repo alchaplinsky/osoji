@@ -1,0 +1,14 @@
+.app {
+  display: flex;
+  height: 100%;
+  padding: var(--pad);
+  gap: var(--pad);
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}

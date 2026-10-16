@@ -1,24 +1,35 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import type { ThemeName } from "../../design/theme";
 import type { ViewNode } from "../../lib/api";
-import { layoutArcs, type Arc } from "./layout";
-import { draw, geometry, hitTest } from "./draw";
+import type { HoverId } from "../../lib/types";
+import { humanBytes } from "../../lib/format";
+import { Eyebrow, Mono, cx } from "../ui";
+import { layoutArcs, relatedKeys, type Arc } from "./layout";
+import { draw, geometry, hitTest, readColors } from "./draw";
+import styles from "./Sunburst.module.css";
 
-type Props = {
+type SunburstProps = {
   view: ViewNode;
-  highlightId: number | null;
-  onHover: (node: ViewNode | null, parent: ViewNode | null) => void;
+  theme: ThemeName;
+  hoverId: HoverId;
+  onHover: (id: HoverId) => void;
   onDrill: (id: number) => void;
   onUp: () => void;
+  /** Font size of the centre size label in px. */
+  centerSize?: number;
+  className?: string;
 };
 
-export default function Sunburst({ view, highlightId, onHover, onDrill, onUp }: Props) {
+export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp, centerSize = 20, className }: SunburstProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
-  const { arcs, maxDepth } = useMemo(() => layoutArcs(view), [view]);
-  const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const [pointer, setPointer] = useState(false);
+  const arcs = useMemo(() => layoutArcs(view), [view]);
+  const related = useMemo(() => relatedKeys(view, hoverId), [view, hoverId]);
 
   useEffect(() => {
-    const el = canvasRef.current?.parentElement;
+    const el = rootRef.current;
     if (!el) return;
     const ro = new ResizeObserver(([e]) => setSize({ w: e.contentRect.width, h: e.contentRect.height }));
     ro.observe(el);
@@ -27,38 +38,57 @@ export default function Sunburst({ view, highlightId, onHover, onDrill, onUp }: 
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || size.w === 0) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = size.w * dpr;
-    canvas.height = size.h * dpr;
-    const ctx = canvas.getContext("2d")!;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, size.w, size.h);
-    const hole = getComputedStyle(document.documentElement).getPropertyValue("--hole").trim();
-    draw(ctx, arcs, geometry(size.w, size.h, maxDepth), dark, highlightId, hole);
-  }, [arcs, maxDepth, size, dark, highlightId]);
+    if (!canvas || size.w === 0 || size.h === 0) return;
+    // Deferred so theme variables applied by ancestor effects are in place before colours are read.
+    const frame = requestAnimationFrame(() => {
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.round(size.w * dpr);
+      const h = Math.round(size.h * dpr);
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, size.w, size.h);
+      draw(ctx, arcs, geometry(size.w, size.h), theme, related, readColors(canvas));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [arcs, related, size, theme]);
 
-  function locate(e: React.MouseEvent): Arc | "center" | null {
-    const rect = canvasRef.current!.getBoundingClientRect();
-    return hitTest(arcs, geometry(size.w, size.h, maxDepth), e.clientX - rect.left, e.clientY - rect.top);
+  function locate(e: MouseEvent): Arc | "center" | null {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return hitTest(arcs, geometry(size.w, size.h), e.clientX - rect.left, e.clientY - rect.top);
   }
 
   return (
-    <div className="sunburst">
+    <div ref={rootRef} className={cx(styles.root, className)}>
       <canvas
         ref={canvasRef}
+        className={cx(styles.canvas, pointer && styles.pointer)}
         onMouseMove={(e) => {
           const hit = locate(e);
-          if (hit && hit !== "center") onHover(hit.node, hit.parent);
-          else onHover(null, null);
+          setPointer(hit !== null);
+          const id = hit && hit !== "center" ? hit.hover : null;
+          if (id !== hoverId) onHover(id);
         }}
-        onMouseLeave={() => onHover(null, null)}
+        onMouseLeave={() => {
+          setPointer(false);
+          if (hoverId !== null) onHover(null);
+        }}
         onClick={(e) => {
           const hit = locate(e);
           if (hit === "center") onUp();
-          else if (hit && hit.node?.dir) onDrill(hit.node.id);
+          else if (hit?.node?.dir) onDrill(hit.node.id);
         }}
       />
+      <div className={styles.center}>
+        <Mono numeral size={centerSize}>
+          {humanBytes(view.size)}
+        </Mono>
+        <Eyebrow className={styles.name}>{view.name}</Eyebrow>
+      </div>
     </div>
   );
 }

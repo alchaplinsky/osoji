@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { cx } from "../cx";
 import styles from "./Menu.module.css";
 
 export type MenuItemDef = { label: ReactNode; hint?: string; onSelect: () => void };
@@ -7,10 +8,12 @@ type Props = {
   open: boolean;
   onClose: () => void;
   items: MenuItemDef[];
+  /** Overrides the default placement (bottom-right of the parent). */
+  className?: string;
 };
 
 /** Dropdown anchored to the bottom-right of a `position: relative` parent. */
-export default function Menu({ open, onClose, items }: Props) {
+export default function Menu({ open, onClose, items, className }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,7 +33,7 @@ export default function Menu({ open, onClose, items }: Props) {
 
   if (!open) return null;
   return (
-    <div ref={ref} role="menu" className={styles.menu}>
+    <div ref={ref} role="menu" className={cx(styles.menu, className)}>
       {items.map((it, i) => (
         <button
           key={i}

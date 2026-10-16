@@ -1,0 +1,50 @@
+.card {
+  text-align: left;
+  padding: 12px;
+  border-radius: var(--radius-xl);
+  border: 1.5px solid var(--line);
+  background: var(--item-bg);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+  box-shadow: var(--panel-sh);
+  transition: border-color .2s, transform .35s var(--ease-spring);
+}
+.card:hover { transform: translateY(-2px); }
+.active { border-color: var(--ac); }
+
+.swatch {
+  position: relative;
+  height: 54px;
+  border-radius: 9px;
+  border: 1px solid rgba(128, 128, 128, .2);
+  overflow: hidden;
+}
+
+.swCard {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  width: 30%;
+  height: 38px;
+  border-radius: var(--radius-xs);
+}
+
+.swAc {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+}
+
+.name {
+  margin-top: 10px;
+  font-weight: 600;
+}
+
+.desc {
+  font-size: 11.5px;
+  color: var(--fg2);
+}

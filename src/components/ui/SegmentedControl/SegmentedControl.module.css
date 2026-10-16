@@ -22,5 +22,6 @@
   white-space: nowrap;
   transition: background .25s, color .25s;
 }
+.opt:disabled { opacity: .4; cursor: default; }
 .md .opt { height: 28px; padding: 0 14px; }
 .active { background: var(--acsoft); color: var(--fg); }

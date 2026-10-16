@@ -6,7 +6,7 @@ for the design, `docs/bench.md` for the benchmark plan and
 `tools/bench/NOTES.md` for results.
 
 ```
-src/                          React + Vite UI: scan controls, breadcrumbs, canvas sunburst, node details
+src/                          React + Vite UI: design tokens (src/design), primitives (src/components/ui), screens (src/screens)
 src-tauri/                    Tauri 2 backend and Cargo workspace root: owns the scan, serves bounded views, reveal, trash
 src-tauri/crates/scan-core    arena, flags, child index, hard-link dedup, progress, jwalk reference walker
 src-tauri/crates/scan-macos   getattrlistbulk walker with a work-stealing deque (the fast one)

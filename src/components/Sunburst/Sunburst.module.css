@@ -1,0 +1,36 @@
+.root {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  animation: popIn .5s var(--ease-spring-soft);
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.pointer { cursor: pointer; }
+
+.center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
+}
+
+.name {
+  margin-top: 6px;
+  max-width: 100px;
+  letter-spacing: .08em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

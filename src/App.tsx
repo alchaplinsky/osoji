@@ -1,71 +1,118 @@
 import { useCallback, useEffect, useState } from "react";
-import ScanControls from "./components/ScanControls";
-import Breadcrumbs from "./components/Breadcrumbs";
-import Sunburst from "./components/Sunburst";
-import NodeDetails from "./components/NodeDetails";
+import { open } from "@tauri-apps/plugin-dialog";
+import Sidebar from "./components/Sidebar";
+import ScanScreen from "./screens/Scan";
+import BreakdownScreen from "./screens/Breakdown";
+import SettingsScreen from "./screens/Settings";
 import { useScan } from "./hooks/useScan";
-import { getView, nodeInfo, type NodeInfo, type ViewNode } from "./lib/api";
+import { useExplorer } from "./hooks/useExplorer";
+import { useTheme } from "./hooks/useTheme";
+import { homeDir, reveal, volumeInfo } from "./lib/api";
+import type { HoverId, Screen, Volume } from "./lib/types";
+import styles from "./App.module.css";
 
 export default function App() {
   const scan = useScan();
-  const [currentId, setCurrentId] = useState<number>(0);
-  const [view, setView] = useState<ViewNode | null>(null);
-  const [info, setInfo] = useState<NodeInfo | null>(null);
-  const [hovered, setHovered] = useState<ViewNode | null>(null);
-  const [hoveredParent, setHoveredParent] = useState<ViewNode | null>(null);
+  const explorer = useExplorer();
+  const { theme } = useTheme();
+  const [screen, setScreen] = useState<Screen>("scan");
+  const [home, setHome] = useState("");
+  const [scanRoot, setScanRoot] = useState("/");
+  const [volume, setVolume] = useState<Volume | null>(null);
+  const [hoverId, setHoverId] = useState<HoverId>(null);
+  const [listOpen, setListOpen] = useState(true);
 
-  const load = useCallback(async (id: number) => {
-    const [v, i] = await Promise.all([getView(id), nodeInfo(id)]);
-    setView(v);
-    setInfo(i);
-    setCurrentId(id);
+  useEffect(() => {
+    homeDir().then(setHome).catch(console.error);
   }, []);
 
   useEffect(() => {
-    if (scan.status === "done") load(0).catch(console.error);
-    if (scan.status === "scanning") {
-      setView(null);
-      setInfo(null);
-    }
-  }, [scan.status, load]);
+    volumeInfo(scanRoot).then(setVolume).catch(console.error);
+  }, [scanRoot]);
 
-  const goUp = () => {
-    const parent = info?.ancestors.at(-1);
-    if (parent) load(parent.id).catch(console.error);
+  const { load, reset } = explorer;
+  useEffect(() => {
+    if (scan.status === "scanning") reset();
+    if (scan.status === "done") {
+      load(0)
+        .then(() => setScreen("breakdown"))
+        .catch(console.error);
+    }
+  }, [scan.status, load, reset]);
+
+  const pickRoot = useCallback(
+    async (choice: "disk" | "home" | "folder") => {
+      if (choice === "disk") return setScanRoot("/");
+      if (choice === "home") return setScanRoot(home || (await homeDir()));
+      const dir = await open({ directory: true, multiple: false, defaultPath: scanRoot });
+      if (typeof dir === "string") setScanRoot(dir);
+    },
+    [home, scanRoot],
+  );
+
+  const rootLabel = scanRoot === "/" ? (volume?.name ?? "Macintosh HD") : home && scanRoot.startsWith(home) ? "~" + scanRoot.slice(home.length) : scanRoot;
+  const scanned = scan.status === "done" && explorer.view !== null;
+
+  const startScan = () => {
+    setScreen("scan");
+    scan.start(scanRoot);
   };
 
+  const navigate = (id: number) => {
+    setHoverId(null);
+    explorer.load(id).catch(console.error);
+  };
+
+  const canShow = (s: Screen) => s === "scan" || s === "settings" || (s === "breakdown" && scanned);
+  const active = canShow(screen) ? screen : "scan";
+
   return (
-    <div className="app">
-      <aside className="sidebar" data-tauri-drag-region>
-        <ScanControls
-          status={scan.status}
-          progress={scan.progress}
-          summary={scan.summary}
-          error={scan.error}
-          onStart={(root) => scan.start(root)}
-          onCancel={scan.cancel}
-        />
-        <hr style={{ border: 0, borderTop: "1px solid var(--border)", width: "100%" }} />
-        <NodeDetails hovered={hovered} hoveredParent={hoveredParent} selected={info} onTrashed={() => load(currentId)} />
-      </aside>
-      <main className="main">
-        <div className="titlebar" data-tauri-drag-region />
-        <div className="content">
-          {view && info ? (
-            <>
-              <Breadcrumbs ancestors={info.ancestors} current={{ id: info.id, name: info.name }} onNavigate={(id) => load(id)} />
-              <Sunburst
-                view={view}
-                highlightId={hovered?.id ?? null}
-                onHover={(n, p) => { setHovered(n); setHoveredParent(p); }}
-                onDrill={(id) => load(id).catch(console.error)}
-                onUp={goUp}
-              />
-            </>
-          ) : (
-            <div className="empty">{scan.status === "scanning" ? "Scanning…" : "Pick a folder and press Scan."}</div>
-          )}
-        </div>
+    <div className={styles.app}>
+      <Sidebar
+        volume={volume}
+        scanRoot={scanRoot}
+        onPickRoot={pickRoot}
+        scanned={scanned}
+        screen={active}
+        onNavigate={(s) => {
+          setHoverId(null);
+          setScreen(s);
+        }}
+      />
+      <main className={styles.main}>
+        {active === "scan" && (
+          <ScanScreen
+            volume={volume}
+            rootLabel={rootLabel}
+            status={scan.status}
+            progress={scan.progress}
+            summary={scan.summary}
+            error={scan.error}
+            onStart={startScan}
+            onStop={scan.cancel}
+          />
+        )}
+        {active === "breakdown" && volume && explorer.rootView && explorer.view && explorer.info && (
+          <BreakdownScreen
+            volume={volume}
+            rootView={explorer.rootView}
+            view={explorer.view}
+            info={explorer.info}
+            theme={theme}
+            hoverId={hoverId}
+            onHover={setHoverId}
+            onNavigate={navigate}
+            onUp={() => {
+              setHoverId(null);
+              explorer.goUp().catch(console.error);
+            }}
+            listOpen={listOpen}
+            onToggleList={() => setListOpen((o) => !o)}
+            onRescan={startScan}
+            onReveal={() => reveal(explorer.currentId).catch(console.error)}
+          />
+        )}
+        {active === "settings" && <SettingsScreen />}
       </main>
     </div>
   );

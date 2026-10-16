@@ -4,15 +4,14 @@ import "@fontsource-variable/hanken-grotesk";
 import "@fontsource-variable/geist-mono";
 import "./design/tokens.css";
 import "./design/themes.css";
-import "./styles.css";
 import App from "./App";
 import Gallery from "./dev/Gallery";
 import { ThemeProvider } from "./hooks/useTheme";
 
-const gallery = new URLSearchParams(location.search).has("gallery");
+const gallery = new URLSearchParams(location.search).get("gallery");
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <ThemeProvider>{gallery ? <Gallery /> : <App />}</ThemeProvider>
+    <ThemeProvider>{gallery === null ? <App /> : <Gallery section={gallery} />}</ThemeProvider>
   </React.StrictMode>,
 );

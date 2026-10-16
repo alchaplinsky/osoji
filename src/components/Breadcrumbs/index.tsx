@@ -1,18 +1,21 @@
 import type { Crumb } from "../../lib/api";
+import { Icon, cx } from "../ui";
+import styles from "./Breadcrumbs.module.css";
 
-type Props = { ancestors: Crumb[]; current: Crumb | null; onNavigate: (id: number) => void };
+type BreadcrumbsProps = { ancestors: Crumb[]; current: Crumb; onNavigate: (id: number) => void };
 
-export default function Breadcrumbs({ ancestors, current, onNavigate }: Props) {
-  if (!current) return null;
+export default function Breadcrumbs({ ancestors, current, onNavigate }: BreadcrumbsProps) {
+  const chain = [...ancestors, current];
   return (
-    <div className="crumbs">
-      {ancestors.map((c) => (
-        <span key={c.id} className="row">
-          <button onClick={() => onNavigate(c.id)}>{c.name}</button>
-          <span className="sep">›</span>
-        </span>
+    <nav className={styles.root}>
+      {chain.map((c, i) => (
+        <div key={c.id} className={styles.crumb}>
+          {i > 0 && <Icon name="chevronRight" size={12} className={styles.sep} />}
+          <button type="button" className={cx(styles.btn, i === chain.length - 1 && styles.current)} onClick={() => onNavigate(c.id)}>
+            {c.name}
+          </button>
+        </div>
       ))}
-      <b>{current.name}</b>
-    </div>
+    </nav>
   );
 }

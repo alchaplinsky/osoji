@@ -12,6 +12,7 @@ export type NodeInfo = {
   error: boolean; trashed: boolean; mtime: number; ancestors: Crumb[];
 };
 export type TrashResult = { freed: number; count: number };
+export type VolumeInfo = { name: string; mount: string; total: number; free: number };
 
 export function startScan(root: string, onProgress: (p: ProgressMsg) => void): Promise<ScanSummary> {
   const channel = new Channel<ProgressMsg>();
@@ -28,3 +29,4 @@ export const nodeInfo = (node: number) => invoke<NodeInfo>("node_info", { node }
 export const reveal = (node: number) => invoke<void>("reveal", { node });
 export const trashNodes = (nodes: number[]) => invoke<TrashResult>("trash_nodes", { nodes });
 export const homeDir = () => invoke<string>("home_dir");
+export const volumeInfo = (path: string) => invoke<VolumeInfo>("volume_info", { path });

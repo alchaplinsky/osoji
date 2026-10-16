@@ -1,7 +1,7 @@
 import { cx } from "../cx";
 import styles from "./SegmentedControl.module.css";
 
-export type SegmentOption<T extends string> = { value: T; label: string };
+export type SegmentOption<T extends string> = { value: T; label: string; disabled?: boolean };
 
 type Props<T extends string> = {
   options: readonly SegmentOption<T>[];
@@ -20,6 +20,7 @@ export default function SegmentedControl<T extends string>({ options, value, onC
           type="button"
           role="radio"
           aria-checked={o.value === value}
+          disabled={o.disabled}
           className={cx(styles.opt, o.value === value && styles.active)}
           onClick={() => onChange(o.value)}
         >

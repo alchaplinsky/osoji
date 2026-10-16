@@ -1,0 +1,49 @@
+import type { ThemeName } from "../../../design/theme";
+import type { ViewNode } from "../../../lib/api";
+import type { HoverId } from "../../../lib/types";
+import { humanBytes } from "../../../lib/format";
+import { Mono, Panel } from "../../../components/ui";
+import { slicesOf } from "../slices";
+import ListRow from "./ListRow";
+import styles from "./ListPanel.module.css";
+
+type ListPanelProps = {
+  view: ViewNode;
+  theme: ThemeName;
+  hoverId: HoverId;
+  onHover: (id: HoverId) => void;
+  onOpen: (id: number) => void;
+};
+
+export default function ListPanel({ view, theme, hoverId, onHover, onOpen }: ListPanelProps) {
+  const slices = slicesOf(view, theme);
+  const largest = slices[0]?.size || 1;
+  const count = view.children.length + view.other_count;
+
+  return (
+    <Panel className={styles.panel}>
+      <div className={styles.header}>
+        <div className={styles.heading}>{view.name}</div>
+        <Mono className={styles.meta}>
+          {count} items · {humanBytes(view.size)}
+        </Mono>
+      </div>
+      <div className={styles.list}>
+        {slices.map(({ node, key, hover, name, size, fill }) => (
+          <ListRow
+            key={key}
+            name={name}
+            sizeLabel={humanBytes(size)}
+            color={fill}
+            pct={(size / largest) * 100}
+            dir={!!node?.dir}
+            hovered={hoverId === hover}
+            onEnter={() => onHover(hover)}
+            onLeave={() => onHover(null)}
+            onOpen={node ? () => onOpen(node.id) : undefined}
+          />
+        ))}
+      </div>
+    </Panel>
+  );
+}

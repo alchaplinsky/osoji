@@ -7,17 +7,17 @@ import {
   SegmentedControl, Sheet, StatTile, Toast, Toggle, type IconName,
 } from "../components/ui";
 
+import ShellPreview from "./previews/ShellPreview";
+import BreakdownPreview from "./previews/BreakdownPreview";
+
 const ICON_NAMES: IconName[] = ["logo", "scan", "breakdown", "largest", "suggest", "watch", "settings", "list", "more", "trash", "chevronDown", "chevronRight", "chevronRightSm", "close", "check", "checkLg"];
 
-/** Dev-only showcase of every primitive. Open http://localhost:1420/?gallery while `vite` runs. */
-export default function Gallery() {
-  const { theme, layout, setTheme, setLayout } = useTheme();
-  const [checked, setChecked] = useState(true);
-  const [on, setOn] = useState(true);
-  const [seg, setSeg] = useState("sunburst");
-  const [menu, setMenu] = useState(false);
-  const [sheet, setSheet] = useState(false);
-  const [toast, setToast] = useState(false);
+/**
+ * Dev-only showcase, served while `vite` runs:
+ * `?gallery` lists every primitive; `?gallery=shell` and `?gallery=breakdown` render screen previews with mock data.
+ */
+export default function Gallery({ section }: { section: string }) {
+  const { setTheme, setLayout } = useTheme();
 
   // `?gallery&theme=glass&layout=classic` picks the appearance for screenshots.
   useEffect(() => {
@@ -26,11 +26,29 @@ export default function Gallery() {
     const l = q.get("layout");
     if (isTheme(t)) setTheme(t);
     if (isLayout(l)) setLayout(l);
-    const open = q.get("open");
+  }, [setTheme, setLayout]);
+
+  if (section === "shell") return <ShellPreview />;
+  if (section === "breakdown") return <BreakdownPreview />;
+  return <Primitives />;
+}
+
+function Primitives() {
+  const { theme, layout, setTheme, setLayout } = useTheme();
+  const [checked, setChecked] = useState(true);
+  const [on, setOn] = useState(true);
+  const [seg, setSeg] = useState("sunburst");
+  const [menu, setMenu] = useState(false);
+  const [sheet, setSheet] = useState(false);
+  const [toast, setToast] = useState(false);
+
+  // `?gallery&open=sheet|toast|menu` opens an overlay for screenshots.
+  useEffect(() => {
+    const open = new URLSearchParams(location.search).get("open");
     if (open === "sheet") setSheet(true);
     if (open === "toast") setToast(true);
     if (open === "menu") setMenu(true);
-  }, [setTheme, setLayout]);
+  }, []);
 
   return (
     <div style={{ minHeight: "100%", padding: 28, display: "flex", flexDirection: "column", gap: 28, maxWidth: 900 }}>

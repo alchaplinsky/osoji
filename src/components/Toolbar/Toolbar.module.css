@@ -1,0 +1,17 @@
+.bar {
+  height: var(--bar-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 var(--px);
+  border-bottom: 1px solid var(--divider);
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}

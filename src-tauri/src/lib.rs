@@ -3,7 +3,8 @@
 
 use scan_core::{Arena, Cancel, ChildIndex, Flags, NodeId, Progress, ScanConfig, NONE};
 use serde::Serialize;
-use std::path::PathBuf;
+use std::ffi::{CStr, CString};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -288,6 +289,47 @@ fn home_dir() -> String {
     std::env::var("HOME").unwrap_or_else(|_| "/".into())
 }
 
+#[derive(Serialize)]
+struct VolumeInfo {
+    name: String,
+    mount: String,
+    total: u64,
+    free: u64,
+}
+
+#[tauri::command]
+fn volume_info(path: String) -> Result<VolumeInfo, String> {
+    let c = CString::new(path).map_err(|e| e.to_string())?;
+    let mut st: libc::statfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statfs(c.as_ptr(), &mut st) } != 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    let mount = unsafe { CStr::from_ptr(st.f_mntonname.as_ptr()) }.to_string_lossy().into_owned();
+    let bsize = st.f_bsize as u64;
+    Ok(VolumeInfo {
+        name: volume_name(&mount),
+        total: st.f_blocks as u64 * bsize,
+        free: st.f_bavail as u64 * bsize,
+        mount,
+    })
+}
+
+/// `/Volumes` holds the user-visible names; the boot volume is a symlink to `/`.
+/// The boot disk's Data volume (home folders live there) shares the boot disk's name.
+fn volume_name(mount: &str) -> String {
+    let target = Path::new(if mount == "/System/Volumes/Data" { "/" } else { mount });
+    let listed = std::fs::read_dir("/Volumes").ok().and_then(|entries| {
+        entries
+            .flatten()
+            .find(|e| std::fs::canonicalize(e.path()).is_ok_and(|p| p == target))
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+    });
+    listed.unwrap_or_else(|| match target.file_name() {
+        Some(n) => n.to_string_lossy().into_owned(),
+        None => "Startup Disk".into(),
+    })
+}
+
 pub fn run() {
     scan_macos::disable_dataless_materialization();
     scan_macos::raise_fd_limit();
@@ -301,7 +343,8 @@ pub fn run() {
             node_info,
             reveal,
             trash_nodes,
-            home_dir
+            home_dir,
+            volume_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,0 +1,8 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 12px;
+}
+
+.title { padding: 6px 10px; }
