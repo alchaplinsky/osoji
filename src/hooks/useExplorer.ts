@@ -19,6 +19,15 @@ export function useExplorer() {
     if (id === 0) setRootView(v);
   }, []);
 
+  /** Re-fetch the root view and move to `id`; used after the tree changed (e.g. items trashed). */
+  const refresh = useCallback(
+    async (id: number) => {
+      const [root] = await Promise.all([getView(0, VIEW_DEPTH), load(id)]);
+      setRootView(root);
+    },
+    [load],
+  );
+
   const reset = useCallback(() => {
     setView(null);
     setInfo(null);
@@ -32,5 +41,5 @@ export function useExplorer() {
     return Promise.resolve();
   }, [info, load]);
 
-  return { currentId, rootView, view, info, load, goUp, reset };
+  return { currentId, rootView, view, info, load, refresh, goUp, reset };
 }

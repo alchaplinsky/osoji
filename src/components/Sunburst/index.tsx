@@ -15,12 +15,14 @@ type SunburstProps = {
   onHover: (id: HoverId) => void;
   onDrill: (id: number) => void;
   onUp: () => void;
+  /** Clicking a file arc; directory arcs drill instead. */
+  onSelectFile?: (id: number) => void;
   /** Font size of the centre size label in px. */
   centerSize?: number;
   className?: string;
 };
 
-export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp, centerSize = 20, className }: SunburstProps) {
+export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp, onSelectFile, centerSize = 20, className }: SunburstProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -81,6 +83,7 @@ export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp,
           const hit = locate(e);
           if (hit === "center") onUp();
           else if (hit?.node?.dir) onDrill(hit.node.id);
+          else if (hit?.node) onSelectFile?.(hit.node.id);
         }}
       />
       <div className={styles.center}>

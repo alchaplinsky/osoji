@@ -1,19 +1,27 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import Sidebar from "./components/Sidebar";
+import ReviewSheet from "./components/ReviewSheet";
+import { Toast } from "./components/ui";
 import ScanScreen from "./screens/Scan";
 import BreakdownScreen from "./screens/Breakdown";
 import SettingsScreen from "./screens/Settings";
 import { useScan } from "./hooks/useScan";
 import { useExplorer } from "./hooks/useExplorer";
+import { useBin } from "./hooks/useBin";
 import { useTheme } from "./hooks/useTheme";
-import { homeDir, reveal, volumeInfo } from "./lib/api";
-import type { HoverId, Screen, Volume } from "./lib/types";
+import { homeDir, reveal, trashNodes, volumeInfo } from "./lib/api";
+import { humanBytes } from "./lib/format";
+import { pathTo } from "./lib/tree";
+import type { BinItem, HoverId, Screen, Volume } from "./lib/types";
 import styles from "./App.module.css";
+
+const TOAST_MS = 4500;
 
 export default function App() {
   const scan = useScan();
   const explorer = useExplorer();
+  const bin = useBin();
   const { theme } = useTheme();
   const [screen, setScreen] = useState<Screen>("scan");
   const [home, setHome] = useState("");
@@ -21,6 +29,11 @@ export default function App() {
   const [volume, setVolume] = useState<Volume | null>(null);
   const [hoverId, setHoverId] = useState<HoverId>(null);
   const [listOpen, setListOpen] = useState(true);
+  const [review, setReview] = useState(false);
+  const [sweeping, setSweeping] = useState(false);
+  const [sweepError, setSweepError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ title: string; sub: string } | null>(null);
+  const toastTimer = useRef<number>();
 
   useEffect(() => {
     homeDir().then(setHome).catch(console.error);
@@ -31,14 +44,18 @@ export default function App() {
   }, [scanRoot]);
 
   const { load, reset } = explorer;
+  const { clear: clearBin } = bin;
   useEffect(() => {
-    if (scan.status === "scanning") reset();
+    if (scan.status === "scanning") {
+      reset();
+      clearBin();
+    }
     if (scan.status === "done") {
       load(0)
         .then(() => setScreen("breakdown"))
         .catch(console.error);
     }
-  }, [scan.status, load, reset]);
+  }, [scan.status, load, reset, clearBin]);
 
   const pickRoot = useCallback(
     async (choice: "disk" | "home" | "folder") => {
@@ -61,6 +78,58 @@ export default function App() {
   const navigate = (id: number) => {
     setHoverId(null);
     explorer.load(id).catch(console.error);
+  };
+
+  /** Describe a node below the current view as a bin item, with its full path and ancestry. */
+  const describe = (id: number): BinItem | null => {
+    const { view, info } = explorer;
+    if (!view || !info) return null;
+    const path = pathTo(view, id);
+    if (path.length < 2) return null;
+    const node = path[path.length - 1];
+    const below = path.slice(1);
+    const base = info.path.replace(/\/$/, "");
+    return {
+      id,
+      name: node.name,
+      path: [base, ...below.map((n) => n.name)].join("/"),
+      size: node.size,
+      dir: node.dir,
+      ancestors: [...info.ancestors.map((a) => a.id), info.id, ...below.slice(0, -1).map((n) => n.id)],
+    };
+  };
+
+  const toggleBin = (id: number) => {
+    const item = describe(id);
+    if (item) bin.toggle(item);
+  };
+
+  const showToast = (title: string, sub: string) => {
+    window.clearTimeout(toastTimer.current);
+    setToast({ title, sub });
+    toastTimer.current = window.setTimeout(() => setToast(null), TOAST_MS);
+  };
+
+  const confirmSweep = async () => {
+    if (sweeping || bin.items.length === 0) return;
+    setSweeping(true);
+    setSweepError(null);
+    try {
+      const result = await trashNodes(bin.items.map((i) => i.id));
+      // If the current folder (or one of its ancestors) was trashed, step up to the nearest surviving parent.
+      const here = [explorer.currentId, ...(explorer.info?.ancestors.map((a) => a.id) ?? [])];
+      const trashedHere = bin.items.find((i) => here.includes(i.id));
+      await explorer.refresh(trashedHere ? (trashedHere.ancestors.at(-1) ?? 0) : explorer.currentId);
+      bin.clear();
+      setReview(false);
+      setHoverId(null);
+      const n = result.count === 1 ? "1 item" : `${result.count} items`;
+      showToast(`Moved ${humanBytes(result.freed)} to the Trash`, `${n}. Empty the Trash to reclaim the space on ${volume?.name ?? "this disk"}.`);
+    } catch (e) {
+      setSweepError(String(e));
+    } finally {
+      setSweeping(false);
+    }
   };
 
   const canShow = (s: Screen) => s === "scan" || s === "settings" || (s === "breakdown" && scanned);
@@ -110,10 +179,28 @@ export default function App() {
             onToggleList={() => setListOpen((o) => !o)}
             onRescan={startScan}
             onReveal={() => reveal(explorer.currentId).catch(console.error)}
+            binItems={bin.items}
+            binIds={bin.ids}
+            onToggleBin={toggleBin}
+            onRemoveFromBin={bin.remove}
+            onReview={() => setReview(true)}
           />
         )}
         {active === "settings" && <SettingsScreen />}
+        {toast && <Toast title={toast.title} sub={toast.sub} />}
       </main>
+      <ReviewSheet
+        open={review}
+        items={bin.items}
+        volumeName={volume?.name ?? "this disk"}
+        busy={sweeping}
+        error={sweepError}
+        onCancel={() => {
+          setReview(false);
+          setSweepError(null);
+        }}
+        onConfirm={confirmSweep}
+      />
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import BreakdownScreen from "../../screens/Breakdown";
 import { useTheme } from "../../hooks/useTheme";
 import type { NodeInfo, ViewNode } from "../../lib/api";
-import type { HoverId, Volume } from "../../lib/types";
+import type { BinItem, HoverId, Volume } from "../../lib/types";
 import { findNode, pathTo } from "../../lib/tree";
 import styles from "./BreakdownPreview.module.css";
 
@@ -80,12 +80,42 @@ function infoFor(node: ViewNode): NodeInfo {
   return { id: node.id, name: node.name, path, size: node.size, items: node.items, dir: node.dir, error: false, trashed: false, mtime: 0, ancestors };
 }
 
+function binItemFor(id: number): BinItem | null {
+  const path = pathTo(ROOT, id);
+  const node = path.at(-1);
+  if (!node || node.id === 0) return null;
+  return { id, name: node.name, path: infoFor(node).path, size: node.size, dir: node.dir, ancestors: path.slice(0, -1).map((n) => n.id) };
+}
+
+function leaves(node: ViewNode): ViewNode[] {
+  return node.dir ? node.children.flatMap(leaves) : [node];
+}
+
+/** `?bin=N` starts with the N largest files already in the bin. */
+function initialBin(): BinItem[] {
+  const n = Number(new URLSearchParams(location.search).get("bin")) || 0;
+  return leaves(ROOT)
+    .sort((a, b) => b.size - a.size)
+    .slice(0, n)
+    .flatMap((leaf) => binItemFor(leaf.id) ?? []);
+}
+
 export default function BreakdownPreview() {
   const { theme } = useTheme();
   const [view, setView] = useState<ViewNode>(ROOT);
   const [hoverId, setHoverId] = useState<HoverId>(null);
   const [listOpen, setListOpen] = useState(true);
+  const [bin, setBin] = useState<BinItem[]>(initialBin);
   const info = useMemo(() => infoFor(view), [view]);
+
+  const toggleBin = (id: number) => {
+    if (bin.some((b) => b.id === id)) {
+      setBin(bin.filter((b) => b.id !== id));
+      return;
+    }
+    const item = binItemFor(id);
+    if (item) setBin(bin.filter((b) => !b.ancestors.includes(id)).concat(item));
+  };
 
   const navigate = (id: number) => {
     const node = findNode(ROOT, id);
@@ -115,6 +145,10 @@ export default function BreakdownPreview() {
           onToggleList={() => setListOpen((o) => !o)}
           onRescan={() => console.info("rescan")}
           onReveal={() => console.info("reveal", info.path)}
+          binItems={bin}
+          onToggleBin={toggleBin}
+          onRemoveFromBin={(id) => setBin(bin.filter((b) => b.id !== id))}
+          onReview={() => console.info("review", bin)}
         />
       </main>
     </div>

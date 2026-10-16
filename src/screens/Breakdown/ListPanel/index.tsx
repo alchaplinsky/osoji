@@ -3,6 +3,7 @@ import type { ViewNode } from "../../../lib/api";
 import type { HoverId } from "../../../lib/types";
 import { humanBytes } from "../../../lib/format";
 import { Mono, Panel } from "../../../components/ui";
+import { startBinDrag } from "../BinBar";
 import { slicesOf } from "../slices";
 import ListRow from "./ListRow";
 import styles from "./ListPanel.module.css";
@@ -13,9 +14,11 @@ type ListPanelProps = {
   hoverId: HoverId;
   onHover: (id: HoverId) => void;
   onOpen: (id: number) => void;
+  binIds: ReadonlySet<number>;
+  onToggleBin: (id: number) => void;
 };
 
-export default function ListPanel({ view, theme, hoverId, onHover, onOpen }: ListPanelProps) {
+export default function ListPanel({ view, theme, hoverId, onHover, onOpen, binIds, onToggleBin }: ListPanelProps) {
   const slices = slicesOf(view, theme);
   const largest = slices[0]?.size || 1;
   const count = view.children.length + view.other_count;
@@ -38,9 +41,12 @@ export default function ListPanel({ view, theme, hoverId, onHover, onOpen }: Lis
             pct={(size / largest) * 100}
             dir={!!node?.dir}
             hovered={hoverId === hover}
+            inBin={!!node && binIds.has(node.id)}
             onEnter={() => onHover(hover)}
             onLeave={() => onHover(null)}
             onOpen={node ? () => onOpen(node.id) : undefined}
+            onToggleBin={node ? () => onToggleBin(node.id) : undefined}
+            onDragStart={node ? (e) => startBinDrag(e, node.id) : undefined}
           />
         ))}
       </div>

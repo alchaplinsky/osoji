@@ -13,6 +13,7 @@
 .spacer { flex: 1; }
 .free { letter-spacing: -.03em; }
 .freeLabel { color: var(--fg2); font-size: 12px; }
+.pending { color: var(--ac); font-size: 12px; font-weight: 600; }
 
 .bar {
   position: relative;
@@ -30,6 +31,15 @@
   transition: width .7s var(--ease-out), opacity .2s;
 }
 .segmentDimmed { opacity: .4; }
+
+.pendingStripe {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(135deg, rgba(0, 0, 0, .5) 0 3px, transparent 3px 7px);
+  transition: left .5s, width .5s;
+  pointer-events: none;
+}
 
 .legend {
   display: flex;

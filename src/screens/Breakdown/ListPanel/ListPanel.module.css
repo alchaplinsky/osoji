@@ -42,13 +42,14 @@
 
 .row {
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto;
+  grid-template-columns: 16px 10px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 8px;
   border-radius: var(--radius-md);
   transition: background .2s;
 }
+.rowDraggable { cursor: grab; }
 .rowHovered { background: var(--card2); }
 
 .swatch {

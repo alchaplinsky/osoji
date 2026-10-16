@@ -1,4 +1,5 @@
-import { Icon, Mono, cx } from "../../../components/ui";
+import type { DragEvent } from "react";
+import { Checkbox, Icon, Mono, cx } from "../../../components/ui";
 import styles from "./ListPanel.module.css";
 
 type ListRowProps = {
@@ -9,15 +10,26 @@ type ListRowProps = {
   pct: number;
   dir: boolean;
   hovered: boolean;
+  inBin: boolean;
   onEnter: () => void;
   onLeave: () => void;
   onOpen?: () => void;
+  /** Omitted for rows that cannot go in the bin (the merged "smaller items" row). */
+  onToggleBin?: () => void;
+  onDragStart?: (e: DragEvent<HTMLDivElement>) => void;
 };
 
-export default function ListRow({ name, sizeLabel, color, pct, dir, hovered, onEnter, onLeave, onOpen }: ListRowProps) {
+export default function ListRow({ name, sizeLabel, color, pct, dir, hovered, inBin, onEnter, onLeave, onOpen, onToggleBin, onDragStart }: ListRowProps) {
+  const binnable = !!onToggleBin;
   return (
-    // PR 3 adds a 16px checkbox column in front of the swatch.
-    <div className={cx(styles.row, hovered && styles.rowHovered)} onMouseEnter={onEnter} onMouseLeave={onLeave}>
+    <div
+      className={cx(styles.row, binnable && styles.rowDraggable, hovered && styles.rowHovered)}
+      draggable={binnable}
+      onDragStart={onDragStart}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+    >
+      {onToggleBin ? <Checkbox checked={inBin} onChange={onToggleBin} aria-label={inBin ? `Remove ${name} from the bin` : `Add ${name} to the bin`} /> : <span />}
       <span className={styles.swatch} style={{ background: color }} />
       <div className={styles.body}>
         <div className={cx(styles.title, dir && styles.titleDir)} onClick={dir ? onOpen : undefined}>

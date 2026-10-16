@@ -15,9 +15,12 @@ type CapacityBarProps = {
   hoverId: HoverId;
   onHover: (id: HoverId) => void;
   onOpen: (id: number) => void;
+  /** Bytes queued in the bin. */
+  pending: number;
 };
 
-export default function CapacityBar({ volume, root, hoverId, onHover, onOpen }: CapacityBarProps) {
+export default function CapacityBar({ volume, root, hoverId, onHover, onOpen, pending }: CapacityBarProps) {
+  const used = volume.total - volume.free;
   const { theme } = useTheme();
   const related = relatedKeys(root, hoverId);
   const segments = slicesOf(root, theme);
@@ -30,10 +33,11 @@ export default function CapacityBar({ volume, root, hoverId, onHover, onOpen }: 
     <Panel className={styles.panel}>
       <div className={styles.summary}>
         <Mono numeral size={28}>
-          {humanBytes(volume.total - volume.free)}
+          {humanBytes(used)}
         </Mono>
         <span className={styles.usedLabel}>used</span>
         <span className={styles.spacer} />
+        {pending > 0 && <Mono className={styles.pending}>−{humanBytes(pending)} after sweep</Mono>}
         <Mono numeral size={16} className={styles.free}>
           {humanBytes(volume.free)}
         </Mono>
@@ -50,6 +54,12 @@ export default function CapacityBar({ volume, root, hoverId, onHover, onOpen }: 
             onClick={() => open(s)}
           />
         ))}
+        {pending > 0 && (
+          <div
+            className={styles.pendingStripe}
+            style={{ left: `${((used - pending) / volume.total) * 100}%`, width: `${(pending / volume.total) * 100}%` }}
+          />
+        )}
       </div>
       <Legend items={segments.filter((s) => s.node).slice(0, 6)} dimmed={dimmed} onHover={onHover} onOpen={open} />
     </Panel>

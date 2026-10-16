@@ -1,0 +1,19 @@
+.frame {
+  height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--bgimg), var(--bg);
+}
+
+.devbar {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg3);
+}
