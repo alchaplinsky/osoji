@@ -1,0 +1,9 @@
+[package]
+name = "scan-macos"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+scan-core = { path = "../scan-core" }
+libc = "0.2"
+crossbeam-deque = "0.8"

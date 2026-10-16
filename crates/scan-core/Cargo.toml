@@ -1,0 +1,8 @@
+[package]
+name = "scan-core"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+bitflags = "2"
+jwalk = "0.8"

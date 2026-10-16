@@ -1,0 +1,10 @@
+[package]
+name = "scan-cli"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+scan-core = { path = "../scan-core" }
+scan-macos = { path = "../scan-macos" }
+clap = { version = "4", features = ["derive"] }
+libc = "0.2"

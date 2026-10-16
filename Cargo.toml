@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["crates/scan-core", "crates/scan-macos", "crates/scan-cli", "app/src-tauri"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+
+[profile.release]
+debug = 1
+lto = "thin"
+codegen-units = 1
