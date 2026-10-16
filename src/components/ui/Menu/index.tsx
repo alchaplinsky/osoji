@@ -8,11 +8,9 @@ type Props = {
   open: boolean;
   onClose: () => void;
   items: MenuItemDef[];
-  /** Overrides the default placement (bottom-right of the parent). */
   className?: string;
 };
 
-/** Dropdown anchored to the bottom-right of a `position: relative` parent. */
 export default function Menu({ open, onClose, items, className }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 

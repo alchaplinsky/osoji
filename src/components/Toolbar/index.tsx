@@ -4,7 +4,6 @@ import styles from "./Toolbar.module.css";
 
 type ToolbarProps = { children: ReactNode; className?: string };
 
-/** Screen header bar; doubles as the window drag region. */
 export default function Toolbar({ children, className }: ToolbarProps) {
   return (
     <div className={cx(styles.bar, className)} data-tauri-drag-region>

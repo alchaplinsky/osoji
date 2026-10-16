@@ -35,7 +35,6 @@ function fromQuery<T extends string>(key: string, allowed: readonly T[], fallbac
   return allowed.includes(v as T) ? (v as T) : fallback;
 }
 
-/** Full-window mock of the app shell: sidebar + Scan / Settings screens with a fake scan. */
 export default function ShellPreview() {
   const [screen, setScreen] = useState<Screen>(() => fromQuery("screen", SCREENS, "scan"));
   const [scanRoot, setScanRoot] = useState("/");
