@@ -12,16 +12,12 @@ export type Bin = {
   clear: () => void;
 };
 
-/** Adding a folder drops its queued descendants. */
 function withItem(items: BinItem[], item: BinItem): BinItem[] {
   if (items.some((b) => b.id === item.id)) return items;
   return items.filter((b) => !b.ancestors.includes(item.id)).concat(item);
 }
 
-/**
- * Everything the user ticked is remembered (so its checkbox stays checked), but `items` and `total`
- * only count entries not already covered by a queued ancestor.
- */
+// A queued ancestor covers its descendants, so reviews and totals never count the same bytes twice.
 export function useBin(): Bin {
   const [queued, setItems] = useState<BinItem[]>([]);
 

@@ -10,12 +10,10 @@ import styles from "./CapacityBar.module.css";
 
 type CapacityBarProps = {
   volume: Volume;
-  /** The root view (id 0); its children are the segments. */
   root: ViewNode;
   hoverId: HoverId;
   onHover: (id: HoverId) => void;
   onOpen: (id: number) => void;
-  /** Bytes queued in the bin. */
   pending: number;
 };
 

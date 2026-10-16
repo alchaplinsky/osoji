@@ -6,7 +6,6 @@ type ListRowProps = {
   name: string;
   sizeLabel: string;
   color: string;
-  /** Bar fill, 0–100. */
   pct: number;
   dir: boolean;
   hovered: boolean;
@@ -14,7 +13,6 @@ type ListRowProps = {
   onEnter: () => void;
   onLeave: () => void;
   onOpen?: () => void;
-  /** Omitted for rows that cannot go in the bin (the merged "smaller items" row). */
   onToggleBin?: () => void;
   onDragStart?: (e: DragEvent<HTMLDivElement>) => void;
 };
