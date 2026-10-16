@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Warm-cache benchmark of the scan-cli walkers (and optionally dua-cli) on a
-# directory. Writes one JSON line per run to bench/results/<date>-<host>.jsonl.
+# directory. Writes one JSON line per run to tools/bench/results/<date>-<host>.jsonl.
 #
-#   bench/run_home.sh [ROOT] [RUNS] [THREADS...]
-#   DUA=/path/to/dua bench/run_home.sh ~ 5 4 8 12
-#   WALKERS="" DUA=/path/to/dua bench/run_home.sh ~ 3 4      # dua only
+#   tools/bench/run_home.sh [ROOT] [RUNS] [THREADS...]
+#   DUA=/path/to/dua tools/bench/run_home.sh ~ 5 4 8 12
+#   WALKERS="" DUA=/path/to/dua tools/bench/run_home.sh ~ 3 4      # dua only
 set -euo pipefail
 ROOT="${1:-$HOME}"
 RUNS="${2:-5}"
@@ -14,10 +14,10 @@ WALKERS="${WALKERS-bulk jwalk}"
 [ ${#THREADS[@]} -eq 1 ] && read -ra THREADS <<<"${THREADS[0]}"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-BIN="$HERE/../target/release/scan-cli"
+BIN="$HERE/../../src-tauri/target/release/scan-cli"
 OUT="$HERE/results/$(date +%Y%m%d-%H%M)-$(hostname -s).jsonl"
 mkdir -p "$HERE/results"
-cargo build --release --manifest-path "$HERE/../Cargo.toml" >/dev/null
+cargo build --release -p scan-cli --manifest-path "$HERE/../../src-tauri/Cargo.toml" >/dev/null
 
 echo "root=$ROOT runs=$RUNS threads=${THREADS[*]} out=$OUT" >&2
 for t in "${THREADS[@]}"; do

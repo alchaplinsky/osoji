@@ -13,15 +13,15 @@
 
 ## Workspace layout
 ```
-crates/
-  scan-core/     # arena, interner, aggregation, views, snapshot
-  scan-macos/    # getattrlistbulk walker, FSEvents, TCC checks
-  scan-linux/    # getdents64 + statx (rustix)
-  scan-windows/  # FindFirstFileExW; opt-in MFT reader
-  scan-cli/      # headless engine binary for benchmarks
-app/src-tauri/   # commands, channels, URI scheme
-app/ui/          # TS, canvas/WebGL sunburst, d3-hierarchy
-bench/           # corpus generator, harness, reports
+src/                 # TS, canvas/WebGL sunburst, d3-hierarchy
+src-tauri/           # Cargo workspace root; commands, channels, URI scheme
+  crates/
+    scan-core/       # arena, interner, aggregation, views, snapshot
+    scan-macos/      # getattrlistbulk walker, FSEvents, TCC checks
+    scan-linux/      # getdents64 + statx (rustix)
+    scan-windows/    # FindFirstFileExW; opt-in MFT reader
+    scan-cli/        # headless engine binary for benchmarks
+tools/bench/         # corpus generator, harness, reports
 ```
 
 ## Crates
