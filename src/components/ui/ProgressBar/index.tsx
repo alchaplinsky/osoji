@@ -3,10 +3,8 @@ import { cx } from "../cx";
 import styles from "./ProgressBar.module.css";
 
 type Props = {
-  /** 0 to 100. */
   value: number;
   height?: number;
-  /** Fill colour; defaults to the accent. */
   color?: string;
   className?: string;
 };

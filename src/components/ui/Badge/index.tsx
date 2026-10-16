@@ -5,10 +5,8 @@ import styles from "./Badge.module.css";
 export type SafetyTone = "safe" | "review" | "keep";
 
 type Props = HTMLAttributes<HTMLSpanElement> & {
-  /** tint: coloured label (safety). outline: "SOON". count: mono number in the sidebar. */
   variant?: "tint" | "outline" | "count";
   tone?: SafetyTone;
-  /** Any CSS colour, used instead of `tone`. */
   color?: string;
 };
 

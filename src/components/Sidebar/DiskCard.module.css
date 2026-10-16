@@ -16,6 +16,10 @@
   cursor: pointer;
 }
 
+.card:disabled {
+  cursor: default;
+}
+
 .head {
   display: flex;
   justify-content: space-between;

@@ -1,6 +1,5 @@
 import type { SVGAttributes } from "react";
 
-/** Stroke icons from the prototype. `box` is the native viewBox size. */
 const ICONS = {
   logo: { box: 14, d: "M2 10c2.6-5.2 7-7 9.8-7-.9 3.5-3.5 6.5-7.9 7.4M5.2 8.2l2.6-2.6" },
   scan: { box: 16, d: "M8 2.2a5.8 5.8 0 1 1-5.8 5.8M8 5a3 3 0 1 0 3 3M8 8l3.6-3.6" },
@@ -26,7 +25,6 @@ export type IconName = keyof typeof ICONS | "more";
 
 type Props = Omit<SVGAttributes<SVGSVGElement>, "name"> & {
   name: IconName;
-  /** Rendered size in px; defaults to the icon's native size. */
   size?: number;
   strokeWidth?: number;
 };
