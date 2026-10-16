@@ -34,7 +34,6 @@ function extension(name: string): string {
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
-/** Short uppercase tag for a file's kind, shown in the Largest files icon tile. */
 export function kindLabel({ name, dir }: { name: string; dir: boolean }): string {
   const ext = extension(name);
   const known = KINDS[ext];

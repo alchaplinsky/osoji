@@ -1,19 +1,22 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { largestFiles, suggestions as fetchSuggestions } from "../lib/api";
 import type { FileEntry, Suggestion } from "../lib/types";
 
-/** Cleanup queries over a finished scan: the largest files and the rule-based suggestions. */
 export function useInsights() {
   const [largest, setLargest] = useState<FileEntry[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const generation = useRef(0);
 
   const load = useCallback(async () => {
+    const gen = ++generation.current;
     const [l, s] = await Promise.all([largestFiles(100), fetchSuggestions()]);
+    if (gen !== generation.current) return;
     setLargest(l);
     setSuggestions(s);
   }, []);
 
   const reset = useCallback(() => {
+    generation.current++;
     setLargest([]);
     setSuggestions([]);
   }, []);
