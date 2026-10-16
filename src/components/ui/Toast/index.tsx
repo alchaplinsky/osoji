@@ -4,7 +4,6 @@ import styles from "./Toast.module.css";
 
 type Props = { title: ReactNode; sub?: ReactNode };
 
-/** Success pill, centred near the bottom of its `position: relative` parent. */
 export default function Toast({ title, sub }: Props) {
   return (
     <div role="status" className={styles.toast}>

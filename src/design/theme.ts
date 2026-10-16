@@ -5,9 +5,7 @@ export type ThemeMeta = {
   label: string;
   desc: string;
   dark: boolean;
-  /** Swatches for theme pickers. */
   swatch: { bg: string; card: string; ac: string };
-  /** Base lightness and chroma of the chart palette (OKLCH). */
   chart: { l: number; c: number };
 };
 

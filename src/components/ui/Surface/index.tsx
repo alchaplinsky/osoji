@@ -13,7 +13,6 @@ export function Panel({ className, ...rest }: DivProps) {
   return <div className={cx(styles.panel, className)} {...rest} />;
 }
 
-/** Eyebrow label over a 20px mono value. */
 export function StatTile({ label, value, className, ...rest }: DivProps & { label: ReactNode; value: ReactNode }) {
   return (
     <Card className={cx(styles.statTile, className)} {...rest}>
