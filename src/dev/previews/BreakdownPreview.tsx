@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import BreakdownScreen from "../../screens/Breakdown";
 import { useTheme } from "../../hooks/useTheme";
 import type { NodeInfo, ViewNode } from "../../lib/api";
-import type { BinItem, HoverId, Volume } from "../../lib/types";
+import type { BinItem, HoverId, Viz, Volume } from "../../lib/types";
 import { findNode, pathTo } from "../../lib/tree";
 import styles from "./BreakdownPreview.module.css";
 
@@ -100,11 +100,20 @@ function initialBin(): BinItem[] {
     .flatMap((leaf) => binItemFor(leaf.id) ?? []);
 }
 
+const VIZ: Viz[] = ["sunburst", "treemap", "shelf", "orbit"];
+
+/** `?viz=treemap|shelf|orbit` starts on that view. */
+function initialViz(): Viz {
+  const v = new URLSearchParams(location.search).get("viz");
+  return VIZ.find((x) => x === v) ?? "sunburst";
+}
+
 export default function BreakdownPreview() {
   const { theme } = useTheme();
   const [view, setView] = useState<ViewNode>(ROOT);
   const [hoverId, setHoverId] = useState<HoverId>(null);
   const [listOpen, setListOpen] = useState(true);
+  const [viz, setViz] = useState<Viz>(initialViz);
   const [bin, setBin] = useState<BinItem[]>(initialBin);
   const info = useMemo(() => infoFor(view), [view]);
 
@@ -143,6 +152,8 @@ export default function BreakdownPreview() {
           }}
           listOpen={listOpen}
           onToggleList={() => setListOpen((o) => !o)}
+          viz={viz}
+          onViz={setViz}
           onRescan={() => console.info("rescan")}
           onReveal={() => console.info("reveal", info.path)}
           binItems={bin}

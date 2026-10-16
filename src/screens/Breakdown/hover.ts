@@ -3,14 +3,20 @@ import { neutral, tone } from "../../design/palette";
 import type { NodeInfo, ViewNode } from "../../lib/api";
 import type { HoverId } from "../../lib/types";
 import { findNode, pathTo } from "../../lib/tree";
+import type { Slice } from "./slices";
 
 export type HoverTarget = { name: string; size: number; pct: number; fill: string };
 
-/** Name, size, share and swatch colour of the hovered slice, looked up in `view` first, then in `root`. */
-export function hoverTarget(view: ViewNode, root: ViewNode, theme: ThemeName, hoverId: HoverId): HoverTarget | null {
+/**
+ * Name, size, share and swatch colour of the hovered slice, looked up in `view` first, then in `root`.
+ * `other` is the chart's merged "smaller items" slice when it covers more than `view.other`.
+ */
+export function hoverTarget(view: ViewNode, root: ViewNode, theme: ThemeName, hoverId: HoverId, other?: Slice): HoverTarget | null {
   if (hoverId === null) return null;
   if (hoverId === "other") {
-    return { name: `${view.other_count} smaller items`, size: view.other, pct: share(view.other, view), fill: neutral(theme) };
+    const name = other?.name ?? `${view.other_count} smaller items`;
+    const size = other?.size ?? view.other;
+    return { name, size, pct: share(size, view), fill: neutral(theme) };
   }
   for (const tree of [view, root]) {
     const path = pathTo(tree, hoverId);

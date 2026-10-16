@@ -549,6 +549,43 @@ fn suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
         .collect())
 }
 
+#[derive(Serialize)]
+struct WatchHit {
+    path: String,
+    id: Option<NodeId>,
+    size: u64,
+    dir: bool,
+}
+
+fn in_trash(a: &Arena, mut id: NodeId) -> bool {
+    while id != NONE {
+        if a.flags[id as usize].contains(Flags::TRASHED) {
+            return true;
+        }
+        id = a.parent[id as usize];
+    }
+    false
+}
+
+/// Size of each watched folder in the latest scan; `id: None` when it is outside the scan, missing or trashed.
+#[tauri::command]
+fn watch_status(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<WatchHit>, String> {
+    let guard = state.scan.lock().unwrap();
+    let scan = guard.as_ref().ok_or("no scan loaded")?;
+    let a = &scan.arena;
+    Ok(paths
+        .into_iter()
+        .map(|path| {
+            let id = find_node(scan, Path::new(&path));
+            if id == NONE || in_trash(a, id) {
+                return WatchHit { path, id: None, size: 0, dir: false };
+            }
+            let i = id as usize;
+            WatchHit { path, id: Some(id), size: a.size[i], dir: a.flags[i].contains(Flags::DIR) }
+        })
+        .collect())
+}
+
 #[tauri::command]
 fn reveal(state: State<'_, AppState>, node: NodeId) -> Result<(), String> {
     let path = {
@@ -655,6 +692,7 @@ pub fn run() {
             node_info,
             largest_files,
             suggestions,
+            watch_status,
             reveal,
             trash_nodes,
             home_dir,

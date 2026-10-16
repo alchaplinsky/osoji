@@ -22,3 +22,25 @@ export function slicesOf(view: ViewNode, theme: ThemeName): Slice[] {
   }
   return slices;
 }
+
+/**
+ * The slices a chart draws: the first `max` children holding at least `minShare` of `view`, then
+ * everything else (smaller children and the merged tail) as one neutral "smaller items" slice.
+ */
+export function visibleSlices(view: ViewNode, theme: ThemeName, max = 14, minShare = 0.006): Slice[] {
+  const slices: Slice[] = [];
+  let restSize = view.other;
+  let restCount = view.other_count;
+  view.children.forEach((n, i) => {
+    if (i < max && view.size > 0 && n.size / view.size >= minShare) {
+      slices.push({ node: n, key: n.id, hover: n.id, name: n.name, size: n.size, fill: tone(theme, i) });
+    } else {
+      restSize += n.size;
+      restCount += 1;
+    }
+  });
+  if (restSize > 0) {
+    slices.push({ node: null, key: otherKey(view.id), hover: "other", name: `${restCount} smaller items`, size: restSize, fill: neutral(theme) });
+  }
+  return slices;
+}

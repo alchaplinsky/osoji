@@ -4,7 +4,9 @@
   gap: 10px;
   min-height: 156px;
   padding: 16px;
+  transition: border-color .2s;
 }
+.card.on { border-color: var(--ac); }
 
 .head {
   display: flex;
@@ -21,3 +23,11 @@
   color: var(--fg2);
   text-wrap: pretty;
 }
+
+.card .toggle {
+  width: 100%;
+  height: 30px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.card .toggle:hover { transform: none; }

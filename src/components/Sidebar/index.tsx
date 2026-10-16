@@ -16,9 +16,11 @@ type SidebarProps = {
   onNavigate: (s: Screen) => void;
   /** Shown next to Suggestions once scanned, e.g. the reclaimable size. */
   suggestBadge?: string;
+  /** The Watchers extension is on; `badge` e.g. "2 over". */
+  watchers?: { badge?: string } | null;
 };
 
-export default function Sidebar({ volume, scanRoot, onPickRoot, scanned, screen, onNavigate, suggestBadge }: SidebarProps) {
+export default function Sidebar({ volume, scanRoot, onPickRoot, scanned, screen, onNavigate, suggestBadge, watchers }: SidebarProps) {
   const item = (target: Screen) => {
     const locked = target !== "scan" && target !== "settings" && !scanned;
     return {
@@ -49,6 +51,11 @@ export default function Sidebar({ volume, scanRoot, onPickRoot, scanned, screen,
         <NavItem icon="largest" label="Largest files" {...item("largest")} />
         <NavItem icon="suggest" label="Suggestions" badge={scanned ? suggestBadge : undefined} {...item("suggest")} />
       </NavSection>
+      {watchers && (
+        <NavSection title="Keep an eye">
+          <NavItem icon="watch" label="Watchers" badge={scanned ? watchers.badge : undefined} {...item("watchers")} />
+        </NavSection>
+      )}
 
       <div className={styles.spacer} />
       <NavItem icon="settings" label="Settings" {...item("settings")} />

@@ -73,3 +73,8 @@ export function relatedKeys(view: ViewNode, hoverId: HoverId): Set<SliceKey> | n
 }
 
 export const isRelated = (related: Set<SliceKey> | null, key: SliceKey) => !related || related.has(key);
+
+const DIMMED = 0.35;
+
+/** Opacity of a slice: full when related to the hover, dimmed otherwise. */
+export const relatedOpacity = (related: Set<SliceKey> | null, key: SliceKey) => (isRelated(related, key) ? 1 : DIMMED);

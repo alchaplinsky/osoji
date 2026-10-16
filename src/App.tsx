@@ -7,17 +7,19 @@ import ScanScreen from "./screens/Scan";
 import BreakdownScreen from "./screens/Breakdown";
 import LargestScreen from "./screens/Largest";
 import SuggestionsScreen from "./screens/Suggestions";
+import WatchersScreen from "./screens/Watchers";
 import SettingsScreen from "./screens/Settings";
 import { useScan } from "./hooks/useScan";
 import { useExplorer } from "./hooks/useExplorer";
 import { useInsights } from "./hooks/useInsights";
+import { useWatchers } from "./hooks/useWatchers";
 import { useBin } from "./hooks/useBin";
 import { useTheme } from "./hooks/useTheme";
 import { useSettings } from "./hooks/useSettings";
-import { homeDir, reveal, trashNodes, volumeInfo } from "./lib/api";
+import { homeDir, nodeInfo, reveal, trashNodes, volumeInfo } from "./lib/api";
 import { humanBytes } from "./lib/format";
 import { pathTo } from "./lib/tree";
-import type { BinItem, HoverId, Screen, Volume } from "./lib/types";
+import type { BinItem, HoverId, Screen, Viz, Volume, WatcherStatus } from "./lib/types";
 import styles from "./App.module.css";
 
 const TOAST_MS = 4500;
@@ -27,10 +29,12 @@ export default function App() {
   const scan = useScan();
   const explorer = useExplorer();
   const insights = useInsights();
+  const watchers = useWatchers();
   const bin = useBin();
   const { theme } = useTheme();
-  const { confirmBig } = useSettings();
+  const { confirmBig, watchers: watchersOn } = useSettings();
   const [screen, setScreen] = useState<Screen>("scan");
+  const [viz, setViz] = useState<Viz>("sunburst");
   const [home, setHome] = useState("");
   const [scanRoot, setScanRoot] = useState("/");
   const [volume, setVolume] = useState<Volume | null>(null);
@@ -52,19 +56,21 @@ export default function App() {
 
   const { load, reset } = explorer;
   const { load: loadInsights, reset: resetInsights } = insights;
+  const { refresh: refreshWatchers, reset: resetWatchers } = watchers;
   const { clear: clearBin } = bin;
   useEffect(() => {
     if (scan.status === "scanning") {
       reset();
       resetInsights();
+      resetWatchers();
       clearBin();
     }
     if (scan.status === "done") {
-      Promise.all([load(0), loadInsights()])
+      Promise.all([load(0), loadInsights(), refreshWatchers()])
         .then(() => setScreen("breakdown"))
         .catch(console.error);
     }
-  }, [scan.status, load, reset, loadInsights, resetInsights, clearBin]);
+  }, [scan.status, load, reset, loadInsights, resetInsights, refreshWatchers, resetWatchers, clearBin]);
 
   const pickRoot = useCallback(
     async (choice: "disk" | "home" | "folder") => {
@@ -128,7 +134,7 @@ export default function App() {
       // If the current folder (or one of its ancestors) was trashed, step up to the nearest surviving parent.
       const here = [explorer.currentId, ...(explorer.info?.ancestors.map((a) => a.id) ?? [])];
       const trashedHere = bin.items.find((i) => here.includes(i.id));
-      await Promise.all([explorer.refresh(trashedHere ? (trashedHere.ancestors.at(-1) ?? 0) : explorer.currentId), insights.load()]);
+      await Promise.all([explorer.refresh(trashedHere ? (trashedHere.ancestors.at(-1) ?? 0) : explorer.currentId), insights.load(), watchers.refresh()]);
       bin.clear();
       setReview(false);
       setHoverId(null);
@@ -144,7 +150,23 @@ export default function App() {
   const bigCount = confirmBig ? bin.items.filter((i) => i.size >= BIG_ITEM).length : 0;
   const warning = bigCount > 0 ? `${bigCount === 1 ? "1 item is" : `${bigCount} items are`} over 1 GB. Double-check before you continue.` : undefined;
 
-  const canShow = (s: Screen) => s === "scan" || s === "settings" || scanned;
+  const addWatcher = async () => {
+    const dir = await open({ directory: true, multiple: false, defaultPath: home || scanRoot });
+    if (typeof dir === "string") watchers.add(dir);
+  };
+
+  /** Jump to the watched folder in the Breakdown; for a file, open its parent and highlight it. */
+  const cleanUp = async (status: WatcherStatus) => {
+    if (status.id === null) return;
+    setScreen("breakdown");
+    if (status.dir) return navigate(status.id);
+    const info = await nodeInfo(status.id);
+    const parent = info.ancestors.at(-1);
+    if (parent) await explorer.load(parent.id);
+    setHoverId(status.id);
+  };
+
+  const canShow = (s: Screen) => s === "scan" || s === "settings" || (s === "watchers" ? watchersOn && scanned : scanned);
   const active = canShow(screen) ? screen : "scan";
 
   const binProps = {
@@ -163,6 +185,7 @@ export default function App() {
         scanned={scanned}
         screen={active}
         suggestBadge={scanned && insights.safeTotal > 0 ? humanBytes(insights.safeTotal) : undefined}
+        watchers={watchersOn ? { badge: scanned && watchers.overCount > 0 ? `${watchers.overCount} over` : undefined } : null}
         onNavigate={(s) => {
           setHoverId(null);
           setScreen(s);
@@ -195,6 +218,8 @@ export default function App() {
               setHoverId(null);
               explorer.goUp().catch(console.error);
             }}
+            viz={viz}
+            onViz={setViz}
             listOpen={listOpen}
             onToggleList={() => setListOpen((o) => !o)}
             onRescan={startScan}
@@ -218,6 +243,17 @@ export default function App() {
             onToggleBin={bin.toggle}
             onAddAll={(items) => items.forEach(bin.add)}
             onRemoveMany={(ids) => ids.forEach(bin.remove)}
+            {...binProps}
+          />
+        )}
+        {active === "watchers" && (
+          <WatchersScreen
+            statuses={watchers.statuses}
+            scanned={scanned}
+            onAdd={() => addWatcher().catch(console.error)}
+            onRemove={watchers.remove}
+            onSetLimit={watchers.setLimit}
+            onCleanUp={(s) => cleanUp(s).catch(console.error)}
             {...binProps}
           />
         )}

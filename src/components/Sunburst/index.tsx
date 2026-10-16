@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { ThemeName } from "../../design/theme";
 import type { ViewNode } from "../../lib/api";
 import type { HoverId } from "../../lib/types";
-import { humanBytes } from "../../lib/format";
-import { Eyebrow, Mono, cx } from "../ui";
+import { useElementSize } from "../../hooks/useElementSize";
+import { cx } from "../ui";
+import CenterLabel from "../viz/CenterLabel";
 import { layoutArcs, relatedKeys, type Arc } from "./layout";
 import { draw, geometry, hitTest, readColors } from "./draw";
 import styles from "./Sunburst.module.css";
@@ -23,20 +24,11 @@ type SunburstProps = {
 };
 
 export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp, onSelectFile, centerSize = 20, className }: SunburstProps) {
-  const rootRef = useRef<HTMLDivElement>(null);
+  const [rootRef, size] = useElementSize<HTMLDivElement>();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [size, setSize] = useState({ w: 0, h: 0 });
   const [pointer, setPointer] = useState(false);
   const arcs = useMemo(() => layoutArcs(view), [view]);
   const related = useMemo(() => relatedKeys(view, hoverId), [view, hoverId]);
-
-  useEffect(() => {
-    const el = rootRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([e]) => setSize({ w: e.contentRect.width, h: e.contentRect.height }));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -86,12 +78,7 @@ export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp,
           else if (hit?.node) onSelectFile?.(hit.node.id);
         }}
       />
-      <div className={styles.center}>
-        <Mono numeral size={centerSize}>
-          {humanBytes(view.size)}
-        </Mono>
-        <Eyebrow className={styles.name}>{view.name}</Eyebrow>
-      </div>
+      <CenterLabel view={view} size={centerSize} />
     </div>
   );
 }

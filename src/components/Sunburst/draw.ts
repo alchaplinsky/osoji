@@ -1,6 +1,6 @@
 import type { ThemeName } from "../../design/theme";
 import { hueAt, neutral, shade } from "../../design/palette";
-import { MAX_DEPTH, isRelated, type Arc, type SliceKey } from "./layout";
+import { MAX_DEPTH, relatedOpacity, type Arc, type SliceKey } from "./layout";
 
 export type Geometry = { cx: number; cy: number; r0: number; ring: number };
 
@@ -21,7 +21,6 @@ export function readColors(el: Element): Colors {
 export const arcFill = (theme: ThemeName, arc: Arc) => (arc.node ? shade(theme, hueAt(arc.index), arc.depth) : neutral(theme));
 
 const RING_GAP = 3;
-const DIMMED = 0.35;
 
 export function draw(ctx: CanvasRenderingContext2D, arcs: Arc[], g: Geometry, theme: ThemeName, related: Set<SliceKey> | null, colors: Colors) {
   ctx.lineWidth = 1.5;
@@ -35,7 +34,7 @@ export function draw(ctx: CanvasRenderingContext2D, arcs: Arc[], g: Geometry, th
     ctx.arc(g.cx, g.cy, outer, a0, a1);
     ctx.arc(g.cx, g.cy, inner, a1, a0, true);
     ctx.closePath();
-    ctx.globalAlpha = isRelated(related, arc.key) ? 1 : DIMMED;
+    ctx.globalAlpha = relatedOpacity(related, arc.key);
     ctx.fillStyle = arcFill(theme, arc);
     ctx.fill();
     ctx.stroke();

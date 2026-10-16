@@ -2,10 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 
 const STORAGE_KEY = "unshift.settings";
 
-type Settings = { confirmBig: boolean };
-type SettingsContextValue = Settings & { setConfirmBig: (v: boolean) => void };
+type Settings = { confirmBig: boolean; watchers: boolean };
+type SettingsContextValue = Settings & { setConfirmBig: (v: boolean) => void; setWatchers: (v: boolean) => void };
 
-const DEFAULTS: Settings = { confirmBig: true };
+const DEFAULTS: Settings = { confirmBig: true, watchers: false };
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 
@@ -18,6 +18,7 @@ function initial(): Settings {
   }
   return {
     confirmBig: typeof stored.confirmBig === "boolean" ? stored.confirmBig : DEFAULTS.confirmBig,
+    watchers: typeof stored.watchers === "boolean" ? stored.watchers : DEFAULTS.watchers,
   };
 }
 
@@ -32,8 +33,15 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     (confirmBig: boolean) => setSettings((s) => (s.confirmBig === confirmBig ? s : { ...s, confirmBig })),
     [],
   );
+  const setWatchers = useCallback(
+    (watchers: boolean) => setSettings((s) => (s.watchers === watchers ? s : { ...s, watchers })),
+    [],
+  );
 
-  const value = useMemo<SettingsContextValue>(() => ({ ...settings, setConfirmBig }), [settings, setConfirmBig]);
+  const value = useMemo<SettingsContextValue>(
+    () => ({ ...settings, setConfirmBig, setWatchers }),
+    [settings, setConfirmBig, setWatchers],
+  );
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }
