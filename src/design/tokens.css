@@ -1,5 +1,3 @@
-/* Theme-independent design tokens, keyframes and global base styles.
-   Colours and surface layout live in themes.css. */
 
 :root {
   --font-ui: "Hanken Grotesk Variable", -apple-system, system-ui, sans-serif;
