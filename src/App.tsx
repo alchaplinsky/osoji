@@ -268,6 +268,7 @@ export default function App() {
             onRescan={startScan}
             onReveal={() => reveal(explorer.currentId).catch(console.error)}
             onToggleBin={toggleBinById}
+            unreadable={scan.summary?.errors}
             {...binProps}
           />
         )}

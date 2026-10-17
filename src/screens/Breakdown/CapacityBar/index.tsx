@@ -5,6 +5,8 @@ import { useTheme } from "../../../hooks/useTheme";
 import { Mono, Panel, cx } from "../../../components/ui";
 import { isRelated, relatedKeys } from "../../../components/Sunburst/layout";
 import { slicesOf, type Slice } from "../slices";
+import { neutral } from "../../../design/palette";
+import { hatch, hiddenBytes, hiddenNote, type NotScanned } from "./capacity";
 import Legend from "./Legend";
 import styles from "./CapacityBar.module.css";
 
@@ -15,14 +17,18 @@ type CapacityBarProps = {
   onHover: (id: HoverId) => void;
   onOpen: (id: number) => void;
   pending: number;
+  /** Folders the scan could not read, mentioned in the "Not scanned" tooltip. */
+  unreadable?: number;
 };
 
-export default function CapacityBar({ volume, root, hoverId, onHover, onOpen, pending }: CapacityBarProps) {
+export default function CapacityBar({ volume, root, hoverId, onHover, onOpen, pending, unreadable }: CapacityBarProps) {
   const used = volume.total - volume.free;
   const { theme } = useTheme();
   const related = relatedKeys(root, hoverId);
   const segments = slicesOf(root, theme);
   const dimmed = (s: Slice) => !isRelated(related, s.key);
+  const hidden = hiddenBytes(volume, root);
+  const notScanned: NotScanned | null = hidden > 0 ? { size: hidden, title: hiddenNote(unreadable), color: neutral(theme), dimmed: hoverId !== null } : null;
   const open = (s: Slice) => {
     if (s.node?.dir) onOpen(s.node.id);
   };
@@ -52,6 +58,14 @@ export default function CapacityBar({ volume, root, hoverId, onHover, onOpen, pe
             onClick={() => open(s)}
           />
         ))}
+        {notScanned && (
+          <div
+            className={cx(styles.notScanned, styles.hatched, notScanned.dimmed && styles.segmentDimmed)}
+            style={{ width: `${(notScanned.size / volume.total) * 100}%`, ...hatch(notScanned.color) }}
+            title={notScanned.title}
+          />
+        )}
+        {/* Absolute, so the hidden segment above does not move it: it always ends at `used`. */}
         {pending > 0 && (
           <div
             className={styles.pendingStripe}
@@ -59,7 +73,7 @@ export default function CapacityBar({ volume, root, hoverId, onHover, onOpen, pe
           />
         )}
       </div>
-      <Legend items={segments.filter((s) => s.node).slice(0, 6)} dimmed={dimmed} onHover={onHover} onOpen={open} />
+      <Legend items={segments.filter((s) => s.node).slice(0, 6)} dimmed={dimmed} onHover={onHover} onOpen={open} notScanned={notScanned} />
     </Panel>
   );
 }
