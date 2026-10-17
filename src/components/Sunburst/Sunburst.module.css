@@ -4,6 +4,7 @@
   align-self: stretch;
   min-width: 0;
   min-height: 0;
+  container-type: size;
   animation: var(--kf-popIn) .5s var(--ease-spring-soft);
 }
 

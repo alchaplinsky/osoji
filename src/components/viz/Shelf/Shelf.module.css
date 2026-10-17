@@ -49,6 +49,11 @@
   margin-top: 16px;
 }
 
+/* Two columns once the stage is too narrow for three cells to keep their names readable. */
+@container (max-width: 600px) {
+  .legend { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 .legendItem {
   display: flex;
   align-items: center;
@@ -76,8 +81,10 @@
 }
 
 .legendSize {
+  flex: none;
   font-size: 11.5px;
   color: var(--fg2);
+  white-space: nowrap;
 }
 
 .insideHead {

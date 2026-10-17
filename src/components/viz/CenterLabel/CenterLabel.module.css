@@ -9,9 +9,10 @@
   pointer-events: none;
 }
 
+/* The name fits inside the chart's hole: roughly 80% of its diameter, which is ≈25% of the chart on both Sunburst and Orbit. */
 .name {
   margin-top: 6px;
-  max-width: 100px;
+  max-width: max(100px, 20cqmin);
   letter-spacing: .08em;
   white-space: nowrap;
   overflow: hidden;

@@ -44,9 +44,12 @@
 }
 
 .empty {
+  min-width: 0;
   color: var(--fg3);
   font-size: 12.5px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .more {

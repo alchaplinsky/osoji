@@ -25,7 +25,7 @@ export default function BinBar({ items, onRemove, onDrop, onReview, wide, floati
   const total = items.reduce((sum, item) => sum + item.size, 0);
   const chips = items.slice(0, VISIBLE_CHIPS);
   const more = items.length - chips.length;
-  const width = empty ? 480 : Math.min(wide ? 860 : 560, 300 + chips.length * 150 + (more > 0 ? 50 : 0));
+  const width = empty ? 500 : Math.min(wide ? 860 : 560, 300 + chips.length * 150 + (more > 0 ? 50 : 0));
 
   const dragOver = (e: DragEvent) => {
     e.preventDefault();
