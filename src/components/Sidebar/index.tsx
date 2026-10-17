@@ -31,7 +31,7 @@ export default function Sidebar({ volume, scanRoot, rootPickerDisabled, onPickRo
 
   return (
     <aside className={styles.sidebar}>
-      <div className={styles.top} data-tauri-drag-region>
+      <div className={styles.top} data-tauri-drag-region="deep">
         <div className={styles.brand}>
           <span className={styles.mark}>
             <Icon name="logo" strokeWidth={1.6} />

@@ -102,6 +102,7 @@ export default function ScanScreen({ volume, rootLabel, status, progress, expect
 
   return (
     <section className={styles.screen}>
+      <div className={styles.dragStrip} data-tauri-drag-region="deep" />
       <ScanRing used={used} scanning={scanning} progress={fraction} value={centre.value} valueSize={centre.size} label={centre.label} />
       <div className={styles.title}>{titleFor(status, rootLabel)}</div>
       <div className={styles.sub}>{subFor(status, summary, error)}</div>

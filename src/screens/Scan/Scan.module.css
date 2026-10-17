@@ -1,4 +1,5 @@
 .screen {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -7,6 +8,16 @@
   justify-content: center;
   padding: 40px;
   animation: var(--kf-springIn) .5s var(--ease-spring-soft);
+}
+
+/* This screen has no toolbar, so an invisible strip the height of one stands in as the
+ * draggable title bar. Out of flow, so the centred content does not move. */
+.dragStrip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--bar-h);
 }
 
 .title {
