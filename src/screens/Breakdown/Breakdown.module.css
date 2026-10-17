@@ -41,12 +41,25 @@
   container-type: size;
 }
 
-/* Radial charts take most of the stage but stop growing on large windows. */
+/* Charts take most of the stage but stop growing on large windows. */
 .radial {
   flex: none;
   align-self: center;
   width: min(88cqmin, 720px);
   height: min(88cqmin, 720px);
+}
+
+.treemap {
+  flex: none;
+  align-self: center;
+  width: min(92cqw, 1120px);
+  height: min(92cqh, 680px);
+}
+
+.shelf {
+  flex: none;
+  align-self: center;
+  width: min(92cqw, 960px);
 }
 
 /* Hover label and chart switcher share the strip above the stage: label on the left, switcher on the right. */

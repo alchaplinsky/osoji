@@ -15,7 +15,7 @@ import SuggestionsPreview from "./previews/SuggestionsPreview";
 import SettingsPreview from "./previews/SettingsPreview";
 import WatchersPreview from "./previews/WatchersPreview";
 
-const ICON_NAMES: IconName[] = ["logo", "scan", "breakdown", "largest", "suggest", "watch", "settings", "list", "more", "trash", "chevronDown", "chevronRight", "chevronRightSm", "close", "check", "checkLg"];
+const ICON_NAMES: IconName[] = ["scan", "breakdown", "largest", "suggest", "watch", "settings", "list", "more", "trash", "chevronDown", "chevronRight", "chevronRightSm", "close", "check", "checkLg"];
 
 export default function Gallery({ section }: { section: string }) {
   const { setTheme, setLayout } = useTheme();

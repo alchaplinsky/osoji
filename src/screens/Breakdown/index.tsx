@@ -45,7 +45,8 @@ const HINTS: Record<Viz, string> = {
 };
 
 const VIEWS: Record<Viz, ComponentType<VizProps>> = { sunburst: Sunburst, treemap: Treemap, shelf: Shelf, orbit: Orbit };
-const RADIAL: ReadonlySet<Viz> = new Set(["sunburst", "orbit"]);
+/** Per-chart sizing inside the stage; see the matching rules in Breakdown.module.css. */
+const STAGE_CLASS: Record<Viz, string> = { sunburst: styles.radial, orbit: styles.radial, treemap: styles.treemap, shelf: styles.shelf };
 
 export default function BreakdownScreen({
   volume,
@@ -83,7 +84,7 @@ export default function BreakdownScreen({
     onUp,
     onSelectFile: onToggleBin,
     centerSize: listOpen ? 20 : 24,
-    className: RADIAL.has(viz) ? styles.radial : undefined,
+    className: STAGE_CLASS[viz],
   };
 
   return (
