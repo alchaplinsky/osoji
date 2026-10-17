@@ -1,6 +1,7 @@
 import { useCallback } from "react";
-import { Button, Sheet } from "../ui";
+import { Button, ProgressBar, Sheet } from "../ui";
 import { humanBytes } from "../../lib/format";
+import type { TrashProgress } from "../../lib/api";
 import type { BinItem } from "../../lib/types";
 import ModeOption from "./ModeOption";
 import ReviewRow from "./ReviewRow";
@@ -11,13 +12,15 @@ type ReviewSheetProps = {
   items: BinItem[];
   volumeName: string;
   busy: boolean;
+  /** Sweep progress; the bar stays indeterminate until the first update arrives. */
+  progress?: TrashProgress | null;
   error: string | null;
   warning?: string;
   onCancel: () => void;
   onConfirm: () => void;
 };
 
-export default function ReviewSheet({ open, items, volumeName, busy, error, warning, onCancel, onConfirm }: ReviewSheetProps) {
+export default function ReviewSheet({ open, items, volumeName, busy, progress, error, warning, onCancel, onConfirm }: ReviewSheetProps) {
   const total = humanBytes(items.reduce((sum, b) => sum + b.size, 0));
   const close = useCallback(() => {
     if (!busy) onCancel();
@@ -35,7 +38,15 @@ export default function ReviewSheet({ open, items, volumeName, busy, error, warn
             <ModeOption label="Move to Trash" hint="You can put items back later" selected />
             <ModeOption label="Delete permanently" hint="Not available yet" disabled title="Unshift never deletes permanently" />
           </div>
-          {busy && (
+          {busy && progress && (
+            <div>
+              <ProgressBar value={progress.total > 0 ? (progress.done / progress.total) * 100 : 100} label="Moving to the Trash" />
+              <div className={styles.progressLabel}>
+                Moving {progress.current} · {progress.done} of {progress.total}
+              </div>
+            </div>
+          )}
+          {busy && !progress && (
             <div className={styles.progress} role="progressbar" aria-label="Moving to the Trash">
               <div className={styles.progressFill} />
             </div>
