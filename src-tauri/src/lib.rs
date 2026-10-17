@@ -387,6 +387,7 @@ const DAY: i64 = 86_400;
 const MIB: u64 = 1024 * 1024;
 const UNDER_HOME: u8 = 1;
 const UNDER_XCODE: u8 = 2;
+const UNDER_CACHES: u8 = 4;
 
 struct Places {
     home: NodeId,
@@ -394,7 +395,6 @@ struct Places {
     caches: NodeId,
     sim_caches: NodeId,
     downloads: NodeId,
-    var_folders: NodeId,
     var_vm: NodeId,
     system: NodeId,
 }
@@ -464,6 +464,9 @@ fn classify(scan: &Scan, p: &Places, id: NodeId, ctx: u8, now: i64) -> Option<(&
     if id == p.system {
         return rule("keep", "Protected by macOS and cannot be changed.");
     }
+    if ctx & UNDER_CACHES != 0 && (parent == p.caches || parent == p.sim_caches) {
+        return rule("safe", "App cache. Rebuilt automatically the next time the app runs.");
+    }
     if dir {
         if name == b"node_modules" {
             return rule("safe", "Installed packages. Reinstalled by npm, pnpm or bun the next time you run install.");
@@ -477,17 +480,8 @@ fn classify(scan: &Scan, p: &Places, id: NodeId, ctx: u8, now: i64) -> Option<(&
         if ctx & UNDER_XCODE != 0 && name == b"iOS DeviceSupport" {
             return rule("safe", "Debug files for devices you may no longer connect. Xcode re-downloads them if needed.");
         }
-        if id == p.caches {
-            return rule("safe", "Apps rebuild their caches automatically. They may open a little slower the first time after.");
-        }
-        if id == p.sim_caches {
-            return rule("safe", "Simulator caches. Rebuilt on demand.");
-        }
         if is_package_cache(a, p, id, ctx) {
             return rule("safe", PACKAGE_CACHE);
-        }
-        if id == p.var_folders {
-            return rule("safe", "Temporary files macOS clears on restart.");
         }
         if name.ends_with(b".pvm") || name.ends_with(b".vmwarevm") {
             return rule("review", "A virtual machine. Remove only if you no longer need it.");
@@ -510,41 +504,53 @@ fn classify(scan: &Scan, p: &Places, id: NodeId, ctx: u8, now: i64) -> Option<(&
     None
 }
 
+/// Whether the current user may create or remove entries in `dir`, which moving a child to the Trash requires.
+fn is_writable(dir: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c) = CString::new(dir.as_os_str().as_bytes()) else {
+        return false;
+    };
+    unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
+}
+
 #[tauri::command]
 fn suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
     let guard = state.scan.lock().unwrap();
     let scan = guard.as_ref().ok_or("no scan loaded")?;
-    let a = &scan.arena;
-    if a.is_empty() {
-        return Ok(Vec::new());
-    }
+    // Scan.root is canonical, so a home reached through a symlink must be resolved the same way.
     let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
     let home = std::fs::canonicalize(&home).unwrap_or(home);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    Ok(collect_suggestions(scan, &home, now))
+}
+
+fn collect_suggestions(scan: &Scan, home: &Path, now: i64) -> Vec<Suggestion> {
+    let a = &scan.arena;
+    if a.is_empty() {
+        return Vec::new();
+    }
     let has_home = home.is_absolute();
     let at = |rel: &str| if has_home { find_node(scan, &home.join(rel)) } else { NONE };
     let xcode_path = home.join("Library/Developer/Xcode");
-    let from_slash = scan.root == Path::new("/");
     let places = Places {
-        home: if has_home { find_node(scan, &home) } else { NONE },
+        home: if has_home { find_node(scan, home) } else { NONE },
         xcode: at("Library/Developer/Xcode"),
         caches: at("Library/Caches"),
         sim_caches: at("Library/Developer/CoreSimulator/Caches"),
         downloads: at("Downloads"),
-        var_folders: if from_slash { find_node(scan, Path::new("/private/var/folders")) } else { NONE },
         var_vm: find_node(scan, Path::new("/private/var/vm")),
         system: find_node(scan, Path::new("/System")),
     };
     // A scan rooted inside home (or Xcode) never contains the home node itself.
     let mut root_ctx = 0;
-    if has_home && scan.root.starts_with(&home) {
+    if has_home && scan.root.starts_with(home) {
         root_ctx |= UNDER_HOME;
     }
     if has_home && scan.root.starts_with(&xcode_path) {
         root_ctx |= UNDER_XCODE;
     }
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64);
 
     let mut found: Vec<(u64, NodeId, &'static str, Cow<'static, str>)> = Vec::new();
     let mut stack: Vec<(NodeId, u8)> = vec![(0, root_ctx)];
@@ -572,14 +578,24 @@ fn suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
         if id == places.xcode {
             child_ctx |= UNDER_XCODE;
         }
+        if id == places.caches || id == places.sim_caches {
+            child_ctx |= UNDER_CACHES;
+        }
         stack.extend(scan.index.children(id).iter().map(|&c| (c, child_ctx)));
     }
     found.sort_unstable_by(|x, y| y.0.cmp(&x.0));
     found.truncate(200);
-    Ok(found
+    for (_, id, safety, reason) in &mut found {
+        let parent = a.parent[*id as usize];
+        if parent != NONE && !is_writable(&a.path(parent)) {
+            *safety = "keep";
+            *reason = Cow::Borrowed("Protected by macOS and cannot be moved by Unshift.");
+        }
+    }
+    found
         .into_iter()
         .map(|(_, id, safety, reason)| Suggestion { entry: file_entry(a, id), safety, reason: reason.into_owned() })
-        .collect())
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -789,6 +805,7 @@ mod tests {
         assert_eq!(scan.arena.items[0], 0);
     }
 
+<<<<<<< HEAD
     #[test]
     fn scans_a_root_reached_through_a_symlink() {
         use std::fs;
@@ -830,5 +847,71 @@ mod tests {
         std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(err.starts_with(&format!("Can't read {}", base.display())), "{err}");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    fn scan_of(root: &Path, arena: Arena) -> Scan {
+        let index = ChildIndex::build(&arena);
+        Scan { root: root.to_path_buf(), arena, index }
+    }
+
+    fn by_name<'a>(found: &'a [Suggestion], name: &str) -> Option<&'a Suggestion> {
+        found.iter().find(|s| s.entry.name == name)
+    }
+
+    #[test]
+    fn suggests_each_app_cache_but_not_the_caches_folder() {
+        // Real directories, so the writability guard sees writable parents.
+        let base = std::env::temp_dir().join(format!("unshift-caches-{}", std::process::id()));
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join("Library/Caches")).unwrap();
+        std::fs::create_dir_all(home.join("Library/Developer/CoreSimulator/Caches")).unwrap();
+
+        let mut a = Arena::default();
+        let root = a.push(NONE, base.as_os_str().as_encoded_bytes(), 0, 0, Flags::DIR);
+        let h = a.push(root, b"home", 0, 0, Flags::DIR);
+        let lib = a.push(h, b"Library", 0, 0, Flags::DIR);
+        let caches = a.push(lib, b"Caches", 0, 0, Flags::DIR);
+        let app = a.push(caches, b"com.example.app", 0, 0, Flags::DIR);
+        a.push(app, b"blob", 10, 0, Flags::empty());
+        a.push(caches, b"loose.db", 5, 0, Flags::empty());
+        let dev = a.push(lib, b"Developer", 0, 0, Flags::DIR);
+        let sim = a.push(dev, b"CoreSimulator", 0, 0, Flags::DIR);
+        let sim_caches = a.push(sim, b"Caches", 0, 0, Flags::DIR);
+        let dyld = a.push(sim_caches, b"dyld", 0, 0, Flags::DIR);
+        a.push(dyld, b"shared", 7, 0, Flags::empty());
+        a.aggregate();
+        let scan = scan_of(&base, a);
+
+        let found = collect_suggestions(&scan, &home, 0);
+        std::fs::remove_dir_all(&base).unwrap();
+
+        for name in ["com.example.app", "loose.db", "dyld"] {
+            let s = by_name(&found, name).unwrap_or_else(|| panic!("{name} not suggested"));
+            assert_eq!(s.safety, "safe");
+            assert_eq!(s.reason, "App cache. Rebuilt automatically the next time the app runs.");
+        }
+        assert!(by_name(&found, "Caches").is_none());
+        assert!(by_name(&found, "blob").is_none());
+        assert!(by_name(&found, "shared").is_none());
+    }
+
+    #[test]
+    fn skips_var_folders_and_keeps_items_in_protected_directories() {
+        let mut a = Arena::default();
+        let root = a.push(NONE, b"/", 0, 0, Flags::DIR);
+        let private = a.push(root, b"private", 0, 0, Flags::DIR);
+        let var = a.push(private, b"var", 0, 0, Flags::DIR);
+        let folders = a.push(var, b"folders", 0, 0, Flags::DIR);
+        a.push(folders, b"tmpfile", 10, 0, Flags::empty());
+        a.push(var, b"Docker.raw", 10, 0, Flags::empty());
+        a.aggregate();
+        let scan = scan_of(Path::new("/"), a);
+
+        let found = collect_suggestions(&scan, Path::new("/nonexistent-home"), 0);
+
+        assert!(by_name(&found, "folders").is_none());
+        let docker = by_name(&found, "Docker.raw").expect("Docker.raw suggested");
+        assert_eq!(docker.safety, "keep");
+        assert_eq!(docker.reason, "Protected by macOS and cannot be moved by Unshift.");
     }
 }
