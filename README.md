@@ -22,6 +22,9 @@ bun tauri dev           # dev build with hot reload
 bun tauri build         # .app and .dmg under src-tauri/target/release/bundle
 ```
 
+Releases are published to GitHub Releases and installed apps update themselves
+from there; see `docs/RELEASING.md`.
+
 ## Run the scanner alone
 ```
 cargo build --release -p scan-cli --manifest-path src-tauri/Cargo.toml

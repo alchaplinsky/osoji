@@ -1,0 +1,63 @@
+/* Update toast — fixed bottom-right so it never collides with the centred
+   sweep toast, and survives screen changes. */
+.toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 360px;
+  padding: 12px 14px;
+  z-index: 25;
+  background: var(--popover);
+  border: 1px solid var(--line2);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(40px) saturate(1.4);
+  transform-origin: bottom right;
+  animation: var(--kf-springIn) .45s var(--ease-spring);
+}
+.icon {
+  margin-top: 1px;
+  color: var(--ac);
+  flex: none;
+}
+.spin { animation: var(--kf-spin) 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .toast, .spin { animation: none; }
+}
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+}
+.text strong { color: var(--fg); font-weight: 600; }
+.text span { color: var(--fg2); font-size: 12px; }
+/* Download progress: a fixed width, so the card doesn't resize as the byte
+   count ticks and the bar has a stable track. */
+.downloading { width: 320px; }
+.downloading .body { flex: 1; }
+/* Release notes from the manifest. Multi-line, so preserve line breaks and
+   cap the height with a scroll for long changelogs. */
+.notes {
+  margin: 0;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-line;
+  color: var(--fg2);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}

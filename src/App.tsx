@@ -20,6 +20,8 @@ import { useSettings } from "./hooks/useSettings";
 import { useFullDiskAccess } from "./hooks/useFullDiskAccess";
 import { useShortcuts } from "./hooks/useShortcuts";
 import { useItemMenu } from "./hooks/useItemMenu";
+import { useAutoUpdate } from "./hooks/useAutoUpdate";
+import UpdateToast from "./components/UpdateToast";
 import { homeDir, nodeInfo, reveal, trashInfo, trashNodes, volumeInfo, volumes as listVolumes } from "./lib/api";
 import type { TrashInfo, TrashProgress } from "./lib/api";
 import { humanBytes } from "./lib/format";
@@ -40,6 +42,7 @@ export default function App() {
   const watchers = useWatchers();
   const bin = useBin();
   const itemMenu = useItemMenu();
+  const autoUpdate = useAutoUpdate();
   const { theme } = useTheme();
   const fda = useFullDiskAccess();
   const { confirmBig, watchers: watchersOn } = useSettings();
@@ -376,6 +379,7 @@ export default function App() {
         onItemMenu={openReviewMenu}
       />
       {itemMenu.element}
+      <UpdateToast ready={autoUpdate.ready} download={autoUpdate.download} status={autoUpdate.status} dismiss={autoUpdate.dismiss} />
     </div>
   );
 }
