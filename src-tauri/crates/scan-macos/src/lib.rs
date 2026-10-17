@@ -90,9 +90,18 @@ fn attrlist() -> AttrList {
     }
 }
 
+/// Which of the root's direct children a directory sits under, for per-child progress.
+#[derive(Clone, Copy)]
+enum Top {
+    /// The scan root itself: each entry registers its own counter.
+    Root,
+    Child(u32),
+}
+
 struct Task {
     id: NodeId,
     path: CString,
+    top: Top,
 }
 
 struct Entry {
@@ -101,6 +110,7 @@ struct Entry {
     size: u64,
     mtime: i64,
     flags: Flags,
+    top: u32,
 }
 
 struct Shared<'a> {
@@ -149,7 +159,7 @@ pub fn walk(cfg: &ScanConfig, progress: &Progress, cancel: &Cancel) -> io::Resul
         qos: cfg.qos,
         cancel,
     };
-    shared.injector.push(Task { id: root, path: root_path });
+    shared.injector.push(Task { id: root, path: root_path, top: Top::Root });
     progress.add(0, 1, 0, 0); // count the root itself, as the jwalk walker does
 
     std::thread::scope(|s| {
@@ -340,17 +350,29 @@ fn process_dir(
             }
             bytes += size;
 
+            let top = match task.top {
+                Top::Root => {
+                    let top = shared.progress.register_top(name);
+                    shared.progress.add_top(top, size);
+                    top
+                }
+                Top::Child(top) => top,
+            };
             entries.push(Entry {
                 name_off: names.len() as u32,
                 name_len: name.len().min(u16::MAX as usize) as u16,
                 size,
                 mtime,
                 flags,
+                top,
             });
             names.extend_from_slice(name);
         }
     }
     unsafe { libc::close(fd) };
+    if let Top::Child(top) = task.top {
+        shared.progress.add_top(top, bytes);
+    }
 
     // Commit the directory as one contiguous block.
     let first_id = {
@@ -377,7 +399,7 @@ fn process_dir(
             p.extend_from_slice(name);
             let Ok(path) = CString::new(p) else { continue };
             shared.pending.fetch_add(1, Ordering::AcqRel);
-            local.push(Task { id: first_id + idx as NodeId, path });
+            local.push(Task { id: first_id + idx as NodeId, path, top: Top::Child(e.top) });
         }
     }
 }
@@ -421,5 +443,45 @@ pub fn raise_fd_limit() {
                 libc::setrlimit(libc::RLIMIT_NOFILE, &rl);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    fn write(path: &Path, bytes: usize) {
+        fs::write(path, vec![0xA5u8; bytes]).unwrap();
+    }
+
+    #[test]
+    fn attributes_bytes_to_the_roots_direct_children() {
+        // The walker opens with O_NOFOLLOW_ANY, and /var is a symlink, so resolve the temp dir first.
+        let root = fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("unshift-tops-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("a")).unwrap();
+        fs::create_dir_all(root.join("b/deep")).unwrap();
+        write(&root.join("a/x"), 8192);
+        write(&root.join("b/y"), 8192);
+        write(&root.join("b/deep/z"), 8192);
+        write(&root.join("top-file"), 8192);
+
+        let cfg = ScanConfig { root: root.clone(), threads: 2, cross_mounts: false, qos: false };
+        let progress = Progress::default();
+        let arena = walk(&cfg, &progress, &Cancel::new(false)).unwrap();
+
+        let mut tops = progress.tops();
+        tops.sort();
+        let total: u64 = tops.iter().map(|(_, b)| b).sum::<u64>() + progress.rest();
+        assert_eq!(tops.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), vec!["a", "b", "top-file"]);
+        assert!(tops[0].1 >= 8192, "a holds one 8 KiB file, got {}", tops[0].1);
+        assert_eq!(tops[1].1, 2 * tops[0].1); // b holds two files of the same size
+        assert_eq!(tops[2].1, tops[0].1); // the root-level file counts as its own child
+        assert_eq!(total, arena.size[0]);
+        assert_eq!(progress.rest(), 0);
+
+        fs::remove_dir_all(&root).unwrap();
     }
 }

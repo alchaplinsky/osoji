@@ -6,7 +6,7 @@
   align-items: center;
   justify-content: center;
   padding: 40px;
-  animation: springIn .5s var(--ease-spring-soft);
+  animation: var(--kf-springIn) .5s var(--ease-spring-soft);
 }
 
 .title {
@@ -48,8 +48,13 @@
   gap: 10px;
 }
 
-.path {
+.bar {
   margin-top: 12px;
+  width: 540px;
+}
+
+.path {
+  margin-top: 10px;
   width: 540px;
   font-family: var(--font-mono);
   font-size: 11px;
@@ -57,7 +62,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  animation: breathe 1.6s ease-in-out infinite;
+  animation: var(--kf-breathe) 1.6s ease-in-out infinite;
 }
 
 .screen .stop {

@@ -13,7 +13,7 @@
   border: 1px solid var(--line2);
   box-shadow: var(--shadow-float);
   backdrop-filter: blur(20px);
-  animation: toastIn .5s var(--ease-spring);
+  animation: var(--kf-toastIn) .5s var(--ease-spring);
 }
 .icon {
   width: 28px;

@@ -18,19 +18,20 @@
   stroke-width: 8;
   stroke-linecap: round;
   transition: stroke-dasharray .7s var(--ease-out), stroke .4s;
-  animation: ringIn 1.1s var(--ease-out);
+  animation: var(--kf-ringIn) 1.1s var(--ease-out);
 }
 
-.spinner {
-  transform-origin: 120px 120px;
-  animation: spin 1.4s linear infinite;
-}
-
-.progress {
+.progress,
+.spinnerArc {
   fill: none;
   stroke: var(--ac);
   stroke-width: 3;
   stroke-linecap: round;
+}
+
+.spinner {
+  transform-origin: 120px 120px;
+  animation: var(--kf-spin) 1.4s linear infinite;
 }
 
 .centre {

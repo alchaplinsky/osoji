@@ -5,7 +5,7 @@
   flex-direction: column;
   min-height: 0;
   border-left-color: var(--line);
-  animation: springIn .45s var(--ease-spring-soft);
+  animation: var(--kf-springIn) .45s var(--ease-spring-soft);
 }
 
 .header {

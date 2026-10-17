@@ -34,6 +34,21 @@
 @keyframes breathe { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 @keyframes ringIn { from { stroke-dashoffset: 653.5; } to { stroke-dashoffset: 0; } }
 
+/* CSS Modules rewrite every bare animation name to a hashed local one, so a module
+   can't reference the shared keyframes above by name. var() values are left alone:
+   write `animation: var(--kf-spin) 1s linear infinite` in a module instead. */
+:root {
+  --kf-spin: spin;
+  --kf-spinRev: spinRev;
+  --kf-springIn: springIn;
+  --kf-popIn: popIn;
+  --kf-fadeIn: fadeIn;
+  --kf-sheetIn: sheetIn;
+  --kf-toastIn: toastIn;
+  --kf-breathe: breathe;
+  --kf-ringIn: ringIn;
+}
+
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 body {

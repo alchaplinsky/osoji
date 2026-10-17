@@ -4,7 +4,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  animation: springIn .5s var(--ease-spring-soft);
+  animation: var(--kf-springIn) .5s var(--ease-spring-soft);
 }
 
 .toolbar { gap: 12px; }

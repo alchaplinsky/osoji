@@ -4,19 +4,55 @@ import Toolbar, { ToolbarTitle } from "../../components/Toolbar";
 import { Button } from "../../components/ui";
 import type { ScanStatus } from "../../hooks/useScan";
 import type { ProgressMsg, ScanSummary } from "../../lib/api";
+import { expectedBytes } from "../../lib/scanEstimate";
 import type { Screen, Volume } from "../../lib/types";
-import ScanScreen from "../../screens/Scan";
+import ScanScreen, { SCAN_SETTLE_MS } from "../../screens/Scan";
 import SettingsScreen from "../../screens/Settings";
 import styles from "./ShellPreview.module.css";
 
 const GB = 1024 ** 3;
 const HOME = "/Users/alex";
 const VOLUME: Volume = { name: "Macintosh HD", mount: "/", total: 1024 * GB, free: 412 * GB };
+const USED = VOLUME.total - VOLUME.free;
 const ROOTS: Record<RootChoice, string> = { disk: "/", home: HOME, folder: `${HOME}/Downloads` };
 const STATUSES: ScanStatus[] = ["idle", "scanning", "done", "error"];
 const SCREENS: Screen[] = ["scan", "breakdown", "largest", "suggest", "settings"];
 
-const MID_SCAN: ProgressMsg = { files: 412_388, dirs: 38_120, bytes: 214.6 * GB, errors: 3, elapsed_ms: 17_400 };
+const MOCK_SCAN_MS = 8_000;
+const TICK_MS = 120;
+const FULL_SCAN = { files: 1_198_421, dirs: 86_482, errors: 37 };
+/** The root's children as a share of used space; each one starts a little after the previous. */
+const TOPS: [string, number][] = [
+  ["Users", 0.42],
+  ["Applications", 0.16],
+  ["private", 0.09],
+  ["Library", 0.08],
+  ["System", 0.06],
+  ["Local snapshots", 0.05],
+  ["usr", 0.04],
+  ["opt", 0.02],
+];
+const REST_SHARE = 1 - TOPS.reduce((sum, [, share]) => sum + share, 0);
+const TOP_LAG = 0.07;
+
+/** Progress of a mock scan at fraction `f` of its run, with top-level folders filling in staggered. */
+function mockProgress(f: number): ProgressMsg {
+  const lagged = (i: number) => Math.max(0, Math.min(1, (f - i * TOP_LAG) / (1 - i * TOP_LAG)));
+  const tops = TOPS.map(([name, share], i) => ({ name, bytes: share * USED * lagged(i) }));
+  const rest = REST_SHARE * USED * lagged(TOPS.length);
+  return {
+    files: Math.round(FULL_SCAN.files * f),
+    dirs: Math.round(FULL_SCAN.dirs * f),
+    bytes: tops.reduce((sum, t) => sum + t.bytes, rest),
+    errors: Math.floor(FULL_SCAN.errors * f),
+    elapsed_ms: Math.round(f * MOCK_SCAN_MS),
+    tops,
+    rest,
+  };
+}
+
+const MID_SCAN = mockProgress(0.35);
+const DONE = mockProgress(1);
 
 function rootLabel(root: string) {
   if (root === VOLUME.mount) return VOLUME.name;
@@ -27,8 +63,6 @@ function rootLabel(root: string) {
 function summaryOf(root: string, p: ProgressMsg, cancelled: boolean): ScanSummary {
   return { root, entries: p.files + p.dirs, bytes: p.bytes, errors: p.errors, elapsed_ms: p.elapsed_ms, cancelled };
 }
-
-const DONE: ProgressMsg = { files: 1_198_421, dirs: 86_482, bytes: 588.3 * GB, errors: 37, elapsed_ms: 48_200 };
 
 function fromQuery<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   const v = new URLSearchParams(location.search).get(key);
@@ -41,23 +75,27 @@ export default function ShellPreview() {
   const [status, setStatus] = useState<ScanStatus>(() => fromQuery("status", STATUSES, "idle"));
   const [progress, setProgress] = useState<ProgressMsg | null>(() => (status === "scanning" ? MID_SCAN : null));
   const [summary, setSummary] = useState<ScanSummary | null>(() => (status === "done" ? summaryOf("/", DONE, false) : null));
+  const [finishing, setFinishing] = useState(false);
 
   useEffect(() => {
     if (status !== "scanning") return;
     const id = setInterval(() => {
-      setProgress((p) => {
-        const base = p ?? { files: 0, dirs: 0, bytes: 0, errors: 0, elapsed_ms: 0 };
-        return {
-          files: base.files + 1800 + Math.round(Math.random() * 1400),
-          dirs: base.dirs + 120 + Math.round(Math.random() * 90),
-          bytes: base.bytes + (0.4 + Math.random() * 1.2) * GB,
-          errors: base.errors + (Math.random() < 0.03 ? 1 : 0),
-          elapsed_ms: base.elapsed_ms + 120,
-        };
-      });
-    }, 120);
+      setProgress((p) => (p && p.elapsed_ms >= MOCK_SCAN_MS ? p : mockProgress(Math.min(1, ((p?.elapsed_ms ?? 0) + TICK_MS) / MOCK_SCAN_MS))));
+    }, TICK_MS);
     return () => clearInterval(id);
   }, [status]);
+
+  // A complete mock scan rests at 100% for a beat, as the app does before showing the breakdown.
+  useEffect(() => {
+    if (status !== "scanning" || !progress || progress.elapsed_ms < MOCK_SCAN_MS) return;
+    setFinishing(true);
+    const id = setTimeout(() => {
+      setSummary(summaryOf(scanRoot, progress, false));
+      setStatus("done");
+      setFinishing(false);
+    }, SCAN_SETTLE_MS);
+    return () => clearTimeout(id);
+  }, [status, progress, scanRoot]);
 
   const goTo = (next: ScanStatus) => {
     setStatus(next);
@@ -98,6 +136,8 @@ export default function ShellPreview() {
             rootLabel={rootLabel(scanRoot)}
             status={status}
             progress={progress}
+            expectedBytes={expectedBytes(VOLUME, scanRoot, summary && !summary.cancelled ? summary.bytes : null)}
+            finishing={finishing}
             summary={summary}
             error={status === "error" ? "Permission denied (os error 13) while reading /private/var/db" : null}
             onStart={start}

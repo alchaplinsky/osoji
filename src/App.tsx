@@ -3,7 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import Sidebar from "./components/Sidebar";
 import ReviewSheet from "./components/ReviewSheet";
 import { Toast } from "./components/ui";
-import ScanScreen from "./screens/Scan";
+import ScanScreen, { SCAN_SETTLE_MS } from "./screens/Scan";
 import BreakdownScreen from "./screens/Breakdown";
 import LargestScreen from "./screens/Largest";
 import SuggestionsScreen from "./screens/Suggestions";
@@ -18,6 +18,8 @@ import { useTheme } from "./hooks/useTheme";
 import { useSettings } from "./hooks/useSettings";
 import { homeDir, nodeInfo, reveal, trashNodes, volumeInfo } from "./lib/api";
 import { humanBytes } from "./lib/format";
+import { expectedBytes } from "./lib/scanEstimate";
+import { useScanTotals } from "./hooks/useScanTotals";
 import { pathTo } from "./lib/tree";
 import type { BinItem, HoverId, Screen, Viz, Volume, WatcherStatus } from "./lib/types";
 import styles from "./App.module.css";
@@ -38,6 +40,8 @@ export default function App() {
   const [home, setHome] = useState("");
   const [scanRoot, setScanRoot] = useState("/");
   const [volume, setVolume] = useState<Volume | null>(null);
+  const totals = useScanTotals();
+  const [finishing, setFinishing] = useState(false);
   const [hoverId, setHoverId] = useState<HoverId>(null);
   const [listOpen, setListOpen] = useState(true);
   const [review, setReview] = useState(false);
@@ -66,6 +70,7 @@ export default function App() {
   const { load: loadInsights, reset: resetInsights } = insights;
   const { refresh: refreshWatchers, reset: resetWatchers } = watchers;
   const { clear: clearBin } = bin;
+  const { remember } = totals;
   useEffect(() => {
     if (scan.status === "scanning") {
       reset();
@@ -74,11 +79,17 @@ export default function App() {
       clearBin();
     }
     if (scan.status === "done") {
-      Promise.all([load(0), loadInsights(), refreshWatchers()])
+      const done = scan.summary;
+      const completed = done !== null && !done.cancelled;
+      if (completed) remember(done.root, done.bytes);
+      setFinishing(completed);
+      const settle = new Promise((resolve) => setTimeout(resolve, completed ? SCAN_SETTLE_MS : 0));
+      Promise.all([load(0), loadInsights(), refreshWatchers(), settle])
         .then(() => setScreen("breakdown"))
-        .catch(console.error);
+        .catch(console.error)
+        .finally(() => setFinishing(false));
     }
-  }, [scan.status, load, reset, loadInsights, resetInsights, refreshWatchers, resetWatchers, clearBin]);
+  }, [scan.status, scan.summary, load, reset, loadInsights, resetInsights, refreshWatchers, resetWatchers, clearBin, remember]);
 
   const changeRoot = useCallback(
     (next: string) => {
@@ -228,6 +239,8 @@ export default function App() {
             rootLabel={rootLabel}
             status={scan.status}
             progress={scan.progress}
+            expectedBytes={expectedBytes(volume, scanRoot, totals.get(scanRoot))}
+            finishing={finishing}
             summary={scan.summary}
             error={scan.error}
             onStart={startScan}
