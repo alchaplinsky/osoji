@@ -10,7 +10,8 @@ type Props = {
   label?: string;
 };
 
-export default function ProgressBar({ value, height = 4, color = "var(--ac)", className, label }: Props) {
+/** `color` is any CSS background; the default is the chart ramp gradient set by the theme provider. */
+export default function ProgressBar({ value, height = 4, color = "var(--chart-ramp)", className, label }: Props) {
   const pct = Math.max(0, Math.min(100, value));
   const vars = { "--h": `${height}px`, "--w": `${pct}%`, "--fill": color } as CSSProperties;
   return (

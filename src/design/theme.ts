@@ -6,7 +6,6 @@ export type ThemeMeta = {
   desc: string;
   dark: boolean;
   swatch: { bg: string; card: string; ac: string };
-  chart: { l: number; c: number };
 };
 
 export const THEMES: Record<ThemeName, ThemeMeta> = {
@@ -15,21 +14,18 @@ export const THEMES: Record<ThemeName, ThemeMeta> = {
     desc: "Amber on charcoal",
     dark: true,
     swatch: { bg: "#0C0C0E", card: "#1C1C1F", ac: "#E0A458" },
-    chart: { l: 0.76, c: 0.15 },
   },
   glass: {
     label: "Glass",
     desc: "Blue-teal & copper",
     dark: true,
     swatch: { bg: "#0B1520", card: "rgba(255,255,255,.14)", ac: "#DB9163" },
-    chart: { l: 0.76, c: 0.14 },
   },
   light: {
     label: "Light",
     desc: "Coral & sand",
     dark: false,
     swatch: { bg: "#F4F0E9", card: "#FFFFFF", ac: "#E8603C" },
-    chart: { l: 0.72, c: 0.16 },
   },
 };
 

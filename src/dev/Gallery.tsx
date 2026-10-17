@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { isLayout, isTheme, LAYOUT_NAMES, LAYOUTS, THEME_NAMES, THEMES } from "../design/theme";
-import { hueAt, neutral, shade } from "../design/palette";
+import { STOPS, neutral, tone } from "../design/palette";
 import { useTheme } from "../hooks/useTheme";
 import {
   Badge, Button, Card, Checkbox, Eyebrow, Icon, IconButton, Menu, Mono, Panel, ProgressBar,
@@ -118,7 +118,8 @@ function Primitives() {
         <div style={{ width: 220, display: "flex", flexDirection: "column", gap: 10 }}>
           <ProgressBar value={61} height={3} />
           <ProgressBar value={88} height={4} color="var(--review)" />
-          <ProgressBar value={35} height={8} color={shade(theme, hueAt(3), 1)} />
+          <ProgressBar value={35} height={8} color={tone(theme, 3)} />
+          <ProgressBar value={100} height={8} />
         </div>
       </Row>
 
@@ -132,8 +133,8 @@ function Primitives() {
       <Row label="Chart palette">
         {[1, 2, 3].map((depth) => (
           <div key={depth} style={{ display: "flex", gap: 4 }}>
-            {Array.from({ length: 10 }, (_, i) => (
-              <span key={i} title={shade(theme, hueAt(i), depth)} style={{ width: 22, height: 22, borderRadius: 6, background: shade(theme, hueAt(i), depth) }} />
+            {STOPS.map((_, i) => (
+              <span key={i} title={tone(theme, i, depth)} style={{ width: 22, height: 22, borderRadius: 6, background: tone(theme, i, depth) }} />
             ))}
             <span style={{ width: 22, height: 22, borderRadius: 6, background: neutral(theme) }} />
           </div>
