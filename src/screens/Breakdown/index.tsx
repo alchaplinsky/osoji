@@ -9,6 +9,7 @@ import BreakdownToolbar from "./BreakdownToolbar";
 import CapacityBar from "./CapacityBar";
 import HoverLabel from "./HoverLabel";
 import ListPanel from "./ListPanel";
+import VizSwitcher from "./VizSwitcher";
 import { capacityHover, hoverTarget } from "./hover";
 import { visibleSlices } from "./slices";
 import styles from "./Breakdown.module.css";
@@ -88,8 +89,6 @@ export default function BreakdownScreen({
       <BreakdownToolbar
         info={info}
         onNavigate={onNavigate}
-        viz={viz}
-        onViz={onViz}
         listOpen={listOpen}
         onToggleList={onToggleList}
         onRescan={onRescan}
@@ -106,6 +105,7 @@ export default function BreakdownScreen({
       <div className={styles.body}>
         <div className={styles.viz}>
           <HoverLabel target={hoverTarget(view, rootView, theme, hoverId, rest)} hint={HINTS[viz]} />
+          <VizSwitcher viz={viz} onViz={onViz} className={styles.vizSwitcher} />
           <div className={styles.stage}>
             <View {...vizProps} />
           </div>

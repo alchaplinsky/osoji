@@ -1,7 +1,9 @@
+import type { ReactNode } from "react";
 import { cx } from "../cx";
 import styles from "./SegmentedControl.module.css";
 
-export type SegmentOption<T extends string> = { value: T; label: string; disabled?: boolean };
+/** With `icon` set the option renders as a square glyph and `label` becomes its tooltip and accessible name. */
+export type SegmentOption<T extends string> = { value: T; label: string; icon?: ReactNode; disabled?: boolean };
 
 type Props<T extends string> = {
   options: readonly SegmentOption<T>[];
@@ -20,11 +22,13 @@ export default function SegmentedControl<T extends string>({ options, value, onC
           type="button"
           role="radio"
           aria-checked={o.value === value}
+          aria-label={o.icon ? o.label : undefined}
+          title={o.icon ? o.label : undefined}
           disabled={o.disabled}
-          className={cx(styles.opt, o.value === value && styles.active)}
+          className={cx(styles.opt, !!o.icon && styles.iconOpt, o.value === value && styles.active)}
           onClick={() => onChange(o.value)}
         >
-          {o.label}
+          {o.icon ?? o.label}
         </button>
       ))}
     </div>
