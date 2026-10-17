@@ -5,7 +5,7 @@
 mod zoom;
 
 use scan_core::{Arena, Cancel, ChildIndex, Flags, NodeId, Progress, ScanConfig, NONE};
-use scan_policy::{Policy, PolicyContext, PolicyHits};
+use scan_policy::{Kind, Policy, PolicyContext, PolicyHits};
 use serde::Serialize;
 use std::borrow::Cow;
 use std::cmp::Reverse;
@@ -23,6 +23,8 @@ struct Scan {
     arena: Arena,
     index: ChildIndex,
     hits: PolicyHits,
+    /// Bytes and items Unshift moved to the Trash since the scan, which the arena no longer counts.
+    swept: (u64, u32),
 }
 
 #[derive(Default)]
@@ -36,14 +38,14 @@ struct AppState {
     sweeping: AtomicBool,
 }
 
-/// Why the UI should treat a node with care: "protected", "risky" or "unexpected".
+/// Why the UI should treat a node with care: "trash", "protected", "risky" or "unexpected".
 #[derive(Serialize, Debug, PartialEq)]
 struct Guard {
     kind: &'static str,
     reason: String,
 }
 
-const POLICY_FLAGS: Flags = Flags::PROTECTED.union(Flags::RISKY).union(Flags::UNEXPECTED);
+const POLICY_FLAGS: Flags = Flags::TRASH_FOLDER.union(Flags::PROTECTED).union(Flags::RISKY).union(Flags::UNEXPECTED);
 
 fn guard_of(policy: &Policy, scan: &Scan, id: NodeId) -> Option<Guard> {
     if !scan.arena.flags[id as usize].intersects(POLICY_FLAGS) {
@@ -308,7 +310,7 @@ async fn start_scan(
         let ctx = PolicyContext { home: home_path(), now: unix_now() };
         let hits = state.policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
         let mut slot = state.scan.lock().unwrap();
-        *slot = Some(Scan { root: cfg.root, arena, index, hits });
+        *slot = Some(Scan { root: cfg.root, arena, index, hits, swept: (0, 0) });
         state.generation.fetch_add(1, Ordering::AcqRel);
     }
     Ok(summary)
@@ -413,9 +415,14 @@ fn node_info(state: State<'_, AppState>, node: NodeId) -> Result<NodeInfo, Strin
 fn largest_files(state: State<'_, AppState>, limit: usize) -> Result<Vec<FileEntry>, String> {
     let guard = state.scan.lock().unwrap();
     let scan = guard.as_ref().ok_or("no scan loaded")?;
+    Ok(largest(&state.policy, scan, limit))
+}
+
+/// The `limit` largest files and packages, skipping what is already in the Trash.
+fn largest(policy: &Policy, scan: &Scan, limit: usize) -> Vec<FileEntry> {
     let a = &scan.arena;
     if limit == 0 || a.is_empty() {
-        return Ok(Vec::new());
+        return Vec::new();
     }
     let mut heap: BinaryHeap<Reverse<(u64, NodeId)>> = BinaryHeap::with_capacity(limit + 1);
     let mut stack: Vec<NodeId> = vec![0];
@@ -423,7 +430,7 @@ fn largest_files(state: State<'_, AppState>, limit: usize) -> Result<Vec<FileEnt
         let i = id as usize;
         let f = a.flags[i];
         let size = a.size[i];
-        if f.contains(Flags::TRASHED) || size == 0 {
+        if f.intersects(GONE) || size == 0 {
             continue;
         }
         if heap.len() == limit && heap.peek().is_some_and(|m| size <= m.0 .0) {
@@ -438,7 +445,7 @@ fn largest_files(state: State<'_, AppState>, limit: usize) -> Result<Vec<FileEnt
         }
         stack.extend(scan.index.children(id).iter().rev());
     }
-    Ok(heap.into_sorted_vec().into_iter().map(|Reverse((_, id))| file_entry(&state.policy, scan, id)).collect())
+    heap.into_sorted_vec().into_iter().map(|Reverse((_, id))| file_entry(policy, scan, id)).collect()
 }
 
 const DAY: i64 = 86_400;
@@ -609,7 +616,7 @@ fn collect_suggestions(policy: &Policy, scan: &Scan, home: &Path, now: i64) -> V
     while let Some((id, ctx)) = stack.pop() {
         let i = id as usize;
         let f = a.flags[i];
-        if f.contains(Flags::TRASHED) {
+        if f.intersects(GONE) {
             continue;
         }
         if id != 0 {
@@ -658,9 +665,13 @@ struct WatchHit {
     dir: bool,
 }
 
-fn in_trash(a: &Arena, mut id: NodeId) -> bool {
+/// Moved to the Trash by Unshift, or sitting in the Trash folder: either way not the user's to sort.
+const GONE: Flags = Flags::TRASHED.union(Flags::TRASH_FOLDER);
+
+/// True when `id` or one of its ancestors was moved to the Trash or is the Trash folder.
+fn gone_or_in_trash(a: &Arena, mut id: NodeId) -> bool {
     while id != NONE {
-        if a.flags[id as usize].contains(Flags::TRASHED) {
+        if a.flags[id as usize].intersects(GONE) {
             return true;
         }
         id = a.parent[id as usize];
@@ -678,7 +689,7 @@ fn watch_status(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<Wa
         .map(|path| {
             // The scan root is canonical; a path that no longer resolves is gone.
             let id = std::fs::canonicalize(&path).map_or(NONE, |p| find_node(scan, &p));
-            if id == NONE || in_trash(a, id) {
+            if id == NONE || gone_or_in_trash(a, id) {
                 return WatchHit { path, id: None, size: 0, dir: false };
             }
             let i = id as usize;
@@ -736,7 +747,7 @@ fn protection(policy: &Policy, scan: &Scan, id: NodeId) -> Option<String> {
 type SweepItem = (NodeId, PathBuf, String, u64);
 
 /// Decide which of `nodes` may go to the Trash. Protected nodes are refused with a reason, unknown
-/// and already trashed ids are skipped. Pure, so the guard is testable without Tauri.
+/// ids and anything already in the Trash are skipped. Pure, so the guard is testable without Tauri.
 fn plan_sweep(policy: &Policy, scan: &Scan, nodes: Vec<NodeId>) -> Result<(Vec<SweepItem>, Vec<String>), String> {
     let mut items = Vec::new();
     let mut refused = Vec::new();
@@ -744,7 +755,7 @@ fn plan_sweep(policy: &Policy, scan: &Scan, nodes: Vec<NodeId>) -> Result<(Vec<S
         if (id as usize) >= scan.arena.len() || id == 0 {
             continue;
         }
-        if scan.arena.flags[id as usize].contains(Flags::TRASHED) {
+        if gone_or_in_trash(&scan.arena, id) {
             continue;
         }
         let path = scan.arena.path(id);
@@ -775,7 +786,9 @@ fn finish_sweep(mut live: Option<&mut Scan>, outcomes: Vec<(NodeId, u64, Result<
             bytes += size;
             continue;
         };
-        bytes += scan.arena.mark_trashed(id);
+        let moved = scan.arena.mark_trashed(id);
+        bytes += moved;
+        scan.swept = (scan.swept.0 + moved, scan.swept.1 + 1);
         let mut p = scan.arena.parent[id as usize];
         while p != NONE {
             scan.index.resort(&scan.arena, p);
@@ -833,6 +846,42 @@ async fn sweep(state: &AppState, nodes: Vec<NodeId>, on_progress: Channel<TrashP
     // A scan that finished meanwhile replaced the arena: the ids no longer point at what was deleted.
     let live = guard.as_mut().filter(|_| state.generation.load(Ordering::Acquire) == generation);
     Ok(finish_sweep(live, outcomes, refused))
+}
+
+#[derive(Serialize)]
+struct TrashInfo {
+    id: NodeId,
+    path: String,
+    size: u64,
+    /// Entries at the top of the Trash, as Finder counts them.
+    items: u32,
+}
+
+/// The user's Trash folder as scanned, plus what Unshift moved there since. None when the scan does not cover it.
+fn trash_of(policy: &Policy, scan: &Scan) -> Option<TrashInfo> {
+    let id = scan.hits.iter().filter(|&(_, rule)| policy.rule(rule).kind == Kind::Trash).map(|(id, _)| id).min()?;
+    let a = &scan.arena;
+    Some(TrashInfo {
+        id,
+        path: a.path(id).to_string_lossy().into_owned(),
+        size: a.size[id as usize] + scan.swept.0,
+        items: scan.index.children(id).len() as u32 + scan.swept.1,
+    })
+}
+
+#[tauri::command]
+fn trash_info(state: State<'_, AppState>) -> Option<TrashInfo> {
+    let guard = state.scan.lock().unwrap();
+    trash_of(&state.policy, guard.as_ref()?)
+}
+
+#[tauri::command]
+fn show_trash() -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg(home_path().join(".Trash"))
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -971,6 +1020,8 @@ pub fn run() {
             watch_status,
             reveal,
             trash_nodes,
+            trash_info,
+            show_trash,
             home_dir,
             volume_info,
             full_disk_access,
@@ -992,7 +1043,7 @@ mod tests {
         let file = arena.push(folder, b"file.bin", 10, 0, Flags::empty());
         arena.aggregate();
         let index = ChildIndex::build(&arena);
-        (Scan { root: PathBuf::from("/tmp/root"), arena, index, hits: PolicyHits::default() }, folder, file)
+        (Scan { root: PathBuf::from("/tmp/root"), arena, index, hits: PolicyHits::default(), swept: (0, 0) }, folder, file)
     }
 
     #[test]
@@ -1010,10 +1061,75 @@ mod tests {
         let (mut scan, folder, file) = scan_fixture();
 
         assert_eq!(scan.arena.mark_trashed(folder), 10);
-        assert!(in_trash(&scan.arena, folder));
-        assert!(in_trash(&scan.arena, file));
+        assert!(gone_or_in_trash(&scan.arena, folder));
+        assert!(gone_or_in_trash(&scan.arena, file));
         assert_eq!(scan.arena.size[0], 0);
         assert_eq!(scan.arena.items[0], 0);
+    }
+
+    const TRASH_POLICY: &str = r#"
+        version = 1
+        [[rule]]
+        id = "trash"
+        kind = "trash"
+        reason = "Already in the Trash."
+        match = { path = "/tmp/root/.Trash" }
+    "#;
+
+    /// `/tmp/root` holding a Trash with one large file, and two smaller files outside it.
+    fn trash_fixture() -> (Policy, Scan, [NodeId; 4]) {
+        let mut arena = Arena::default();
+        let root = arena.push(NONE, b"/tmp/root", 0, 0, Flags::DIR);
+        let trash = arena.push(root, b".Trash", 0, 0, Flags::DIR);
+        let docs = arena.push(root, b"docs", 0, 0, Flags::DIR);
+        let old = arena.push(trash, b"old.iso", 100, 0, Flags::empty());
+        let report = arena.push(docs, b"report.pdf", 20, 0, Flags::empty());
+        arena.push(root, b"notes.txt", 5, 0, Flags::empty());
+        arena.aggregate();
+        let index = ChildIndex::build(&arena);
+        let policy = Policy::from_toml(TRASH_POLICY).unwrap();
+        let ctx = PolicyContext { home: PathBuf::new(), now: 0 };
+        let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
+        (policy, Scan { root: PathBuf::from("/tmp/root"), arena, index, hits, swept: (0, 0) }, [trash, docs, old, report])
+    }
+
+    #[test]
+    fn treats_the_trash_folder_and_its_contents_as_gone() {
+        let (policy, mut scan, [trash, docs, old, report]) = trash_fixture();
+
+        assert!(gone_or_in_trash(&scan.arena, trash));
+        assert!(gone_or_in_trash(&scan.arena, old));
+        assert!(!gone_or_in_trash(&scan.arena, docs));
+        assert!(!gone_or_in_trash(&scan.arena, report));
+        assert_eq!(guard_of(&policy, &scan, trash), Some(Guard { kind: "trash", reason: "Already in the Trash.".into() }));
+
+        let (items, refused) = plan_sweep(&policy, &scan, vec![trash, old, report]).unwrap();
+        assert_eq!(items.iter().map(|item| item.0).collect::<Vec<_>>(), vec![report]);
+        assert!(refused.is_empty());
+
+        scan.arena.mark_trashed(docs);
+        assert!(gone_or_in_trash(&scan.arena, report));
+    }
+
+    #[test]
+    fn largest_files_skip_the_trash() {
+        let (policy, scan, _) = trash_fixture();
+        let names: Vec<String> = largest(&policy, &scan, 10).into_iter().map(|e| e.name).collect();
+        assert_eq!(names, ["report.pdf", "notes.txt"]);
+    }
+
+    #[test]
+    fn reports_the_trash_with_what_was_swept_since_the_scan() {
+        let (policy, mut scan, [trash, _, _, report]) = trash_fixture();
+        let info = trash_of(&policy, &scan).unwrap();
+        assert_eq!((info.id, info.path.as_str(), info.size, info.items), (trash, "/tmp/root/.Trash", 100, 1));
+
+        finish_sweep(Some(&mut scan), vec![(report, 20, Ok(()))], Vec::new());
+        let info = trash_of(&policy, &scan).unwrap();
+        assert_eq!((info.size, info.items), (120, 2));
+
+        let (plain, _, _) = scan_fixture();
+        assert!(trash_of(&policy, &plain).is_none());
     }
 
     const GUARD_POLICY: &str = r#"
@@ -1049,7 +1165,7 @@ mod tests {
         let policy = Policy::from_toml(GUARD_POLICY).unwrap();
         let ctx = PolicyContext { home: PathBuf::new(), now: 0 };
         let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
-        let mut scan = Scan { root: PathBuf::from("/tmp/root"), arena, index, hits };
+        let mut scan = Scan { root: PathBuf::from("/tmp/root"), arena, index, hits, swept: (0, 0) };
 
         assert_eq!(guard_of(&policy, &scan, keep), Some(Guard { kind: "protected", reason: "Keep it.".into() }));
         assert_eq!(guard_of(&policy, &scan, loose), Some(Guard { kind: "risky", reason: "Big file.".into() }));
@@ -1093,7 +1209,7 @@ mod tests {
         let cfg = ScanConfig { root: root.clone(), threads: 2, cross_mounts: false, qos: false };
         let arena = scan_macos::walk(&cfg, &Progress::default(), &Cancel::new(false)).unwrap();
         let index = ChildIndex::build(&arena);
-        let scan = Scan { root, arena, index, hits: PolicyHits::default() };
+        let scan = Scan { root, arena, index, hits: PolicyHits::default(), swept: (0, 0) };
 
         let f = find_node(&scan, &fs::canonicalize(link.join("sub/f")).unwrap());
         assert_ne!(f, NONE);
@@ -1122,7 +1238,7 @@ mod tests {
 
     fn scan_of(root: &Path, arena: Arena) -> Scan {
         let index = ChildIndex::build(&arena);
-        Scan { root: root.to_path_buf(), arena, index, hits: PolicyHits::default() }
+        Scan { root: root.to_path_buf(), arena, index, hits: PolicyHits::default(), swept: (0, 0) }
     }
 
     fn by_name<'a>(found: &'a [Suggestion], name: &str) -> Option<&'a Suggestion> {

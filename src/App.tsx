@@ -19,8 +19,8 @@ import { useTheme } from "./hooks/useTheme";
 import { useSettings } from "./hooks/useSettings";
 import { useFullDiskAccess } from "./hooks/useFullDiskAccess";
 import { useShortcuts } from "./hooks/useShortcuts";
-import { homeDir, nodeInfo, reveal, trashNodes, volumeInfo, volumes as listVolumes } from "./lib/api";
-import type { TrashProgress } from "./lib/api";
+import { homeDir, nodeInfo, reveal, trashInfo, trashNodes, volumeInfo, volumes as listVolumes } from "./lib/api";
+import type { TrashInfo, TrashProgress } from "./lib/api";
 import { humanBytes } from "./lib/format";
 import { reviewWarning } from "./lib/bin";
 import { expectedBytes } from "./lib/scanEstimate";
@@ -57,6 +57,8 @@ export default function App() {
   const [sweepProgress, setSweepProgress] = useState<TrashProgress | null>(null);
   const [toast, setToast] = useState<{ title: string; sub: string } | null>(null);
   const toastTimer = useRef<number>();
+  const [trash, setTrash] = useState<TrashInfo | null>(null);
+  const loadTrash = useCallback(() => trashInfo().then(setTrash), []);
 
   useEffect(() => {
     homeDir().then(setHome).catch(console.error);
@@ -100,12 +102,12 @@ export default function App() {
       if (completed) remember(done.root, done.bytes);
       setFinishing(completed);
       const settle = new Promise((resolve) => setTimeout(resolve, completed ? SCAN_SETTLE_MS : 0));
-      Promise.all([load(0), loadInsights(), refreshWatchers(), settle])
+      Promise.all([load(0), loadInsights(), refreshWatchers(), loadTrash(), settle])
         .then(() => setScreen("breakdown"))
         .catch(console.error)
         .finally(() => setFinishing(false));
     }
-  }, [scan.status, scan.summary, load, reset, loadInsights, resetInsights, refreshWatchers, resetWatchers, clearBin, remember]);
+  }, [scan.status, scan.summary, load, reset, loadInsights, resetInsights, refreshWatchers, resetWatchers, clearBin, remember, loadTrash]);
 
   const changeRoot = useCallback(
     (next: string) => {
@@ -193,7 +195,7 @@ export default function App() {
       const moved = new Set(result.trashed);
       const trashedHere = bin.items.find((i) => moved.has(i.id) && here.includes(i.id));
       result.trashed.forEach(bin.remove);
-      await Promise.all([explorer.refresh(trashedHere ? (trashedHere.ancestors.at(-1) ?? 0) : explorer.currentId), insights.load(), watchers.refresh()]);
+      await Promise.all([explorer.refresh(trashedHere ? (trashedHere.ancestors.at(-1) ?? 0) : explorer.currentId), insights.load(), watchers.refresh(), loadTrash()]);
       setHoverId(null);
       if (result.failed.length > 0) {
         setSweepError(result.failed.join("\n"));
@@ -259,6 +261,7 @@ export default function App() {
         home={home}
         rootPickerDisabled={scan.status === "scanning" || sweeping}
         onPickRoot={pickRoot}
+        trash={trash}
         scanned={scanned}
         screen={active}
         suggestBadge={scanned && insights.safeTotal > 0 ? humanBytes(insights.safeTotal) : undefined}

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { relatedKeys } from "../Sunburst/layout";
 import type { ViewNode } from "../../lib/api";
-import { visibleSlices } from "../../screens/Breakdown/slices";
+import { neutral, tone } from "../../design/palette";
+import { slicesOf, visibleSlices } from "../../screens/Breakdown/slices";
 import { squarify } from "./Treemap/squarify";
 
 function node(id: number, size: number, children: ViewNode[] = [], other = 0, otherCount = 0): ViewNode {
@@ -15,6 +16,17 @@ describe("visualization layout", () => {
 
     expect(slices.map((slice) => slice.size)).toEqual([50, 20, 30]);
     expect(slices.at(-1)?.name).toBe("4 smaller items");
+  });
+
+  test("names the Trash folder and draws it neutral", () => {
+    const trash = { ...node(1, 40), name: ".Trash", guard: { kind: "trash" as const, reason: "Already in the Trash." } };
+    const view = node(0, 100, [trash, node(2, 60)]);
+
+    for (const slices of [visibleSlices(view, "instrument"), slicesOf(view, "instrument")]) {
+      expect(slices.map((slice) => slice.name)).toEqual(["Trash", "node-2"]);
+      expect(slices[0].fill).toBe(neutral("instrument"));
+      expect(slices[1].fill).toBe(tone("instrument", 1));
+    }
   });
 
   test("keeps the hovered ancestry and subtree related", () => {

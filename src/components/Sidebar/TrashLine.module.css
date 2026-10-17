@@ -1,0 +1,22 @@
+.line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 11px;
+  margin: 0 0 6px;
+}
+
+.size { color: var(--fg2); }
+
+.show {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg3);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.show:hover { color: var(--fg); }
