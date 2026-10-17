@@ -1,7 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import { cancelScan, startScan, type ProgressMsg, type ScanSummary } from "../lib/api";
 
-export type ScanStatus = "idle" | "scanning" | "done" | "error";
+/** "stopped": the user cancelled the scan; nothing from it was kept. */
+export type ScanStatus = "idle" | "scanning" | "done" | "stopped" | "error";
 
 export function useScan() {
   const [status, setStatus] = useState<ScanStatus>("idle");
@@ -22,7 +23,7 @@ export function useScan() {
       });
       if (gen !== generation.current) return null;
       setSummary(s);
-      setStatus("done");
+      setStatus(s.cancelled ? "stopped" : "done");
       return s;
     } catch (e) {
       if (gen !== generation.current) return null;

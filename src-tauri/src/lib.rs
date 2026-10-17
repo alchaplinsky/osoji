@@ -237,16 +237,21 @@ async fn start_scan(
 
     let result = task.map_err(|e| e.to_string())?;
     let arena = result.map_err(|e| e.to_string())?;
-    let index = ChildIndex::build(&arena);
+    let cancelled = cancel.load(Ordering::Relaxed);
     let summary = ScanSummary {
         root: root.clone(),
         entries: arena.len(),
         bytes: arena.size[0],
         errors: progress.errors.load(Ordering::Relaxed),
         elapsed_ms: t0.elapsed().as_millis() as u64,
-        cancelled: cancel.load(Ordering::Relaxed),
+        cancelled,
     };
-    *state.scan.lock().unwrap() = Some(Scan { root: cfg.root, arena, index });
+    // A stopped walk leaves every unfinished directory under-counted, so it never replaces the
+    // last complete scan.
+    if !cancelled {
+        let index = ChildIndex::build(&arena);
+        *state.scan.lock().unwrap() = Some(Scan { root: cfg.root, arena, index });
+    }
     Ok(summary)
 }
 

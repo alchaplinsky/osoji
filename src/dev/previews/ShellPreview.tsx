@@ -15,7 +15,7 @@ const HOME = "/Users/alex";
 const VOLUME: Volume = { name: "Macintosh HD", mount: "/", total: 1024 * GB, free: 412 * GB };
 const USED = VOLUME.total - VOLUME.free;
 const ROOTS: Record<RootChoice, string> = { disk: "/", home: HOME, folder: `${HOME}/Downloads` };
-const STATUSES: ScanStatus[] = ["idle", "scanning", "done", "error"];
+const STATUSES: ScanStatus[] = ["idle", "scanning", "done", "stopped", "error"];
 const SCREENS: Screen[] = ["scan", "breakdown", "largest", "suggest", "settings"];
 
 const MOCK_SCAN_MS = 8_000;
@@ -100,8 +100,8 @@ export default function ShellPreview() {
   const goTo = (next: ScanStatus) => {
     setStatus(next);
     setProgress(next === "scanning" ? MID_SCAN : null);
-    setSummary(next === "done" ? summaryOf(scanRoot, DONE, false) : null);
-    if (next === "scanning" || next === "error") setScreen("scan");
+    setSummary(next === "done" ? summaryOf(scanRoot, DONE, false) : next === "stopped" ? summaryOf(scanRoot, MID_SCAN, true) : null);
+    if (next === "scanning" || next === "stopped" || next === "error") setScreen("scan");
   };
 
   const start = () => {
@@ -112,8 +112,8 @@ export default function ShellPreview() {
   };
 
   const stop = () => {
-    setSummary(summaryOf(scanRoot, progress ?? DONE, true));
-    setStatus("done");
+    setSummary(summaryOf(scanRoot, progress ?? MID_SCAN, true));
+    setStatus("stopped");
   };
 
   const pickRoot = (choice: RootChoice) => {
