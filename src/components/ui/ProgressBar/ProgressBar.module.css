@@ -1,4 +1,5 @@
 .track {
+  position: relative;
   height: var(--h);
   border-radius: calc(var(--h) / 2);
   background: var(--line);
@@ -10,4 +11,18 @@
   background: var(--fill);
   border-radius: inherit;
   transition: width .6s var(--ease-out), background .4s;
+}
+/* Unknown total: a short segment sweeps the track until a Content-Length (or the end) arrives. */
+.indeterminate .fill {
+  position: absolute;
+  width: 35%;
+  transition: none;
+  animation: sweep 1.2s ease-in-out infinite;
+}
+@keyframes sweep {
+  from { left: -35%; }
+  to { left: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .indeterminate .fill { animation: none; left: 0; width: 100%; opacity: .4; }
 }
