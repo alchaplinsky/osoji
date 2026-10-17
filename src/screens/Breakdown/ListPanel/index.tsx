@@ -32,7 +32,7 @@ export default function ListPanel({ view, theme, hoverId, onHover, onOpen, binId
         </Mono>
       </div>
       <div className={styles.list}>
-        {slices.map(({ node, key, hover, name, size, fill }) => (
+        {slices.map(({ node, key, hover, name, size, fill, error }) => (
           <ListRow
             key={key}
             name={name}
@@ -40,6 +40,7 @@ export default function ListPanel({ view, theme, hoverId, onHover, onOpen, binId
             color={fill}
             pct={(size / largest) * 100}
             dir={!!node?.dir}
+            locked={error}
             hovered={hoverId === hover}
             inBin={!!node && binIds.has(node.id)}
             onEnter={() => onHover(hover)}

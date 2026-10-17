@@ -733,6 +733,34 @@ fn volume_name(mount: &str) -> String {
     })
 }
 
+/// Folders under `$HOME` that macOS only lets an app list once it has Full Disk Access.
+const TCC_PROBES: [&str; 3] = ["Library/Mail", "Library/Safari", "Library/Messages"];
+const PRIVACY_ALL_FILES_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
+
+/// Granted when any protected folder that exists can be listed; with none present there is nothing to block.
+#[tauri::command]
+fn full_disk_access() -> bool {
+    let home = PathBuf::from(home_dir());
+    let mut denied = false;
+    for dir in TCC_PROBES.map(|p| home.join(p)) {
+        match std::fs::read_dir(&dir) {
+            Ok(_) => return true,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => denied = true,
+            Err(_) => {}
+        }
+    }
+    !denied
+}
+
+#[tauri::command]
+fn open_privacy_settings() -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg(PRIVACY_ALL_FILES_URL)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 pub fn run() {
     scan_macos::disable_dataless_materialization();
     scan_macos::raise_fd_limit();
@@ -764,7 +792,9 @@ pub fn run() {
             reveal,
             trash_nodes,
             home_dir,
-            volume_info
+            volume_info,
+            full_disk_access,
+            open_privacy_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
