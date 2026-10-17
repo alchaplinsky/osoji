@@ -4,11 +4,13 @@ import type { NodeInfo, ViewNode } from "../../lib/api";
 import type { BinItem, HoverId, Viz, Volume } from "../../lib/types";
 import Sunburst from "../../components/Sunburst";
 import { Orbit, Shelf, Treemap, type VizProps } from "../../components/viz";
+import { cx } from "../../components/ui";
 import BinBar from "./BinBar";
 import BreakdownToolbar from "./BreakdownToolbar";
 import CapacityBar from "./CapacityBar";
 import HoverLabel from "./HoverLabel";
 import ListPanel from "./ListPanel";
+import ListToggle from "./ListToggle";
 import VizSwitcher from "./VizSwitcher";
 import { capacityHover, hoverTarget } from "./hover";
 import { visibleSlices } from "./slices";
@@ -89,14 +91,7 @@ export default function BreakdownScreen({
 
   return (
     <section className={styles.screen}>
-      <BreakdownToolbar
-        info={info}
-        onNavigate={onNavigate}
-        listOpen={listOpen}
-        onToggleList={onToggleList}
-        onRescan={onRescan}
-        onReveal={onReveal}
-      />
+      <BreakdownToolbar info={info} onNavigate={onNavigate} onRescan={onRescan} onReveal={onReveal} />
       <CapacityBar
         volume={volume}
         root={rootView}
@@ -105,7 +100,7 @@ export default function BreakdownScreen({
         onOpen={onNavigate}
         pending={pending}
       />
-      <div className={styles.body}>
+      <div className={cx(styles.body, listOpen ? styles.listOpen : styles.listHidden)}>
         <div className={styles.viz}>
           <HoverLabel target={hoverTarget(view, rootView, theme, hoverId, rest)} hint={HINTS[viz]} />
           <VizSwitcher viz={viz} onViz={onViz} className={styles.vizSwitcher} />
@@ -122,9 +117,10 @@ export default function BreakdownScreen({
             wide={!listOpen}
           />
         </div>
-        {listOpen && (
+        <div className={styles.listSlot}>
           <ListPanel view={view} theme={theme} hoverId={hoverId} onHover={onHover} onOpen={onNavigate} binIds={binIds} onToggleBin={onToggleBin} />
-        )}
+        </div>
+        <ListToggle open={listOpen} onToggle={onToggleList} className={styles.listToggle} />
       </div>
     </section>
   );

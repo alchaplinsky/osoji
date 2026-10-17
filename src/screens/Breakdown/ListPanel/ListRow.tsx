@@ -42,8 +42,12 @@ export default function ListRow({ name, sizeLabel, color, pct, dir, hovered, inB
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
     >
-      {onToggleBin ? <Checkbox checked={inBin} onChange={onToggleBin} aria-label={inBin ? `Remove ${name} from the bin` : `Add ${name} to the bin`} /> : <span />}
-      <span className={styles.swatch} style={{ background: color }} />
+      <span className={styles.mark}>
+        <span className={styles.swatch} style={{ background: color }} />
+        {onToggleBin && (
+          <Checkbox checked={inBin} onChange={onToggleBin} className={styles.check} aria-label={inBin ? `Remove ${name} from the bin` : `Add ${name} to the bin`} />
+        )}
+      </span>
       <div className={styles.body}>
         <div className={styles.title}>
           <span className={styles.name}>{name}</span>
