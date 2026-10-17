@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Folder, HardDrive, House } from "lucide-react";
 import type { Volume } from "../../lib/types";
 import { humanBytes } from "../../lib/format";
 import { Icon, Menu, Mono, ProgressBar } from "../ui";
@@ -44,9 +45,9 @@ export default function DiskCard({ volume, scanRoot, disabled, onPickRoot }: Dis
         onClose={() => setOpen(false)}
         className={styles.menu}
         items={[
-          { label: "Macintosh HD", onSelect: () => onPickRoot("disk") },
-          { label: "Home folder", onSelect: () => onPickRoot("home") },
-          { label: "Choose folder…", onSelect: () => onPickRoot("folder") },
+          { label: "Macintosh HD", icon: <HardDrive size={16} strokeWidth={1.5} />, onSelect: () => onPickRoot("disk") },
+          { label: "Home folder", icon: <House size={16} strokeWidth={1.5} />, onSelect: () => onPickRoot("home") },
+          { label: "Choose folder…", icon: <Folder size={16} strokeWidth={1.5} />, onSelect: () => onPickRoot("folder") },
         ]}
       />
     </div>
