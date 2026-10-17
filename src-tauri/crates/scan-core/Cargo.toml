@@ -6,3 +6,6 @@ version.workspace = true
 [dependencies]
 bitflags = "2"
 jwalk = "0.8"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

@@ -4,9 +4,14 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-#[derive(Copy, Clone, Debug, ValueEnum)]
+#[derive(Copy, Clone, Debug, Default, ValueEnum)]
 enum Walker {
+    /// getattrlistbulk with a work-stealing deque; macOS only
+    #[cfg(target_os = "macos")]
+    #[cfg_attr(target_os = "macos", default)]
     Bulk,
+    /// jwalk with per-entry lstat; the portable reference
+    #[cfg_attr(not(target_os = "macos"), default)]
     Jwalk,
 }
 
@@ -15,7 +20,7 @@ enum Walker {
 struct Args {
     /// Directory to scan
     root: PathBuf,
-    #[arg(long, value_enum, default_value_t = Walker::Bulk)]
+    #[arg(long, value_enum, default_value_t = Walker::default())]
     walker: Walker,
     /// Worker threads (default: min(cores, 8))
     #[arg(long)]
@@ -38,7 +43,9 @@ fn max_rss_mb() -> f64 {
     unsafe {
         let mut ru: libc::rusage = std::mem::zeroed();
         libc::getrusage(libc::RUSAGE_SELF, &mut ru);
-        ru.ru_maxrss as f64 / (1024.0 * 1024.0)
+        // ru_maxrss is bytes on macOS and kilobytes on Linux.
+        let bytes = if cfg!(target_os = "linux") { ru.ru_maxrss * 1024 } else { ru.ru_maxrss };
+        bytes as f64 / (1024.0 * 1024.0)
     }
 }
 
@@ -50,7 +57,11 @@ fn human(bytes: u64) -> String {
         v /= 1024.0;
         i += 1;
     }
-    if i == 0 { format!("{bytes} B") } else { format!("{v:.2} {}", U[i]) }
+    if i == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{v:.2} {}", U[i])
+    }
 }
 
 fn print_top(arena: &Arena, top: usize) {
@@ -79,16 +90,19 @@ fn print_top(arena: &Arena, top: usize) {
 
 fn main() {
     let args = Args::parse();
-    let threads = args.threads.unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8));
+    let threads =
+        args.threads.unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8));
     let cfg = ScanConfig { root: args.root.clone(), threads, cross_mounts: args.cross_mounts, qos: !args.no_qos };
 
+    #[cfg(target_os = "macos")]
     scan_macos::disable_dataless_materialization();
-    scan_macos::raise_fd_limit();
+    scan_core::raise_fd_limit();
 
     let progress = Progress::default();
     let cancel = AtomicBool::new(false);
     let t0 = Instant::now();
     let result = match args.walker {
+        #[cfg(target_os = "macos")]
         Walker::Bulk => scan_macos::walk(&cfg, &progress, &cancel),
         Walker::Jwalk => scan_core::jwalk_walker::walk(&cfg, &progress, &cancel),
     };
@@ -122,11 +136,12 @@ fn main() {
     }
 
     println!("walker={walker} threads={threads} root={}", args.root.display());
-    println!(
-        "entries={} files={files} dirs={dirs} errors={errors} hardlink_dups={dups} mounts={mounts}",
-        arena.len()
-    );
+    println!("entries={} files={files} dirs={dirs} errors={errors} hardlink_dups={dups} mounts={mounts}", arena.len());
     println!("total={} ({bytes} B)  root_size={}", human(bytes), human(arena.size[0]));
-    println!("elapsed={:.3}s  max_rss={rss:.0} MB  rate={:.0} entries/s", elapsed.as_secs_f64(), arena.len() as f64 / elapsed.as_secs_f64());
+    println!(
+        "elapsed={:.3}s  max_rss={rss:.0} MB  rate={:.0} entries/s",
+        elapsed.as_secs_f64(),
+        arena.len() as f64 / elapsed.as_secs_f64()
+    );
     print_top(&arena, args.top);
 }

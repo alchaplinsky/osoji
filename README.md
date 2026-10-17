@@ -29,7 +29,7 @@ from there; see `docs/RELEASING.md`.
 ```
 bun run lint            # eslint + tsc
 bun run test            # vitest unit tests (src/**/*.test.ts)
-cargo fmt --check --manifest-path src-tauri/Cargo.toml
+cargo fmt --all --check --manifest-path src-tauri/Cargo.toml
 cargo clippy --workspace --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
 cargo test --workspace --manifest-path src-tauri/Cargo.toml
 bun run test:e2e:build  # debug build, then WebdriverIO drives the real app (tests/e2e)
@@ -39,10 +39,16 @@ The e2e suite talks to a WebDriver server that `tauri-plugin-webdriver` runs
 on port 4445 in builds made with `--features webdriver`, never in release
 bundles. It starts Vite and the app itself and points the app's `HOME` at a
 small fixture folder. `.github/workflows/ci.yml` runs
-all of the above on pull requests and on `main`. The frontend checks and the
-`scan-core` / `scan-policy` crates run on Linux; the app crate and
-`scan-macos` only build on macOS (the walker is `getattrlistbulk`), so their
-tests and the e2e suite run on a macOS runner.
+all of the above on pull requests and on `main`. Linux builds and tests
+everything except `scan-macos`; the macOS runner covers that crate, the macOS
+platform module and the e2e suite, which drives the walker that ships.
+
+## Platforms
+
+`src-tauri/src/platform` holds what differs per OS: the walker, volumes,
+file-manager hand-offs and the permission probe. macOS runs the
+`getattrlistbulk` walker; Linux builds with the portable jwalk reference walker
+until a native one lands (spec M7). Windows does not build yet (spec M8).
 
 ## Run the scanner alone
 ```

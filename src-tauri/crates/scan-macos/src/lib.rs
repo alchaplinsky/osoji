@@ -5,7 +5,7 @@
 //! block to the shared arena under a single lock acquisition.
 
 use crossbeam_deque::{Injector, Stealer, Worker};
-use scan_core::{Arena, Cancel, Flags, HardlinkSet, Progress, ScanConfig, NodeId, NONE};
+use scan_core::{Arena, Cancel, Flags, HardlinkSet, NodeId, Progress, ScanConfig, NONE};
 use std::ffi::CString;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
@@ -235,10 +235,7 @@ fn process_dir(
     names.clear();
 
     let fd = unsafe {
-        libc::open(
-            task.path.as_ptr(),
-            libc::O_RDONLY | libc::O_DIRECTORY | O_NOFOLLOW_ANY | libc::O_CLOEXEC,
-        )
+        libc::open(task.path.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | O_NOFOLLOW_ANY | libc::O_CLOEXEC)
     };
     if fd < 0 {
         mark_error(shared, task.id);
@@ -429,20 +426,6 @@ pub fn disable_dataless_materialization() {
             IOPOL_SCOPE_PROCESS,
             IOPOL_MATERIALIZE_DATALESS_FILES_OFF,
         );
-    }
-}
-
-/// Raise the soft fd limit so deep queues of open directories do not hit EMFILE.
-pub fn raise_fd_limit() {
-    unsafe {
-        let mut rl = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) == 0 {
-            let want = 10240.min(rl.rlim_max);
-            if rl.rlim_cur < want {
-                rl.rlim_cur = want;
-                libc::setrlimit(libc::RLIMIT_NOFILE, &rl);
-            }
-        }
     }
 }
 

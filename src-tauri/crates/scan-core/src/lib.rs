@@ -189,6 +189,21 @@ impl ChildIndex {
 /// Shared cancel flag for a running scan.
 pub type Cancel = AtomicBool;
 
+/// Raise the soft fd limit so deep queues of open directories do not hit EMFILE. Any walker benefits.
+#[cfg(unix)]
+pub fn raise_fd_limit() {
+    unsafe {
+        let mut rl = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) == 0 {
+            let want = 10240.min(rl.rlim_max);
+            if rl.rlim_cur < want {
+                rl.rlim_cur = want;
+                libc::setrlimit(libc::RLIMIT_NOFILE, &rl);
+            }
+        }
+    }
+}
+
 /// First occurrence of a (dev, ino) with nlink > 1 counts; later ones are dups.
 #[derive(Default)]
 pub struct HardlinkSet(Mutex<HashSet<(u64, u64)>>);

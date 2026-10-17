@@ -1,11 +1,11 @@
 //! Reference walker B: jwalk with per-entry lstat, the same approach dua-cli uses.
 
 use crate::{Arena, Cancel, Flags, HardlinkSet, Progress, ScanConfig, NONE};
-use std::sync::atomic::Ordering;
 use jwalk::{Parallelism, WalkDirGeneric};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
+use std::sync::atomic::Ordering;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Meta {
@@ -105,11 +105,7 @@ pub fn walk(cfg: &ScanConfig, progress: &Progress, cancel: &Cancel) -> io::Resul
         }
         bytes += size;
 
-        let name: &[u8] = if depth == 0 {
-            cfg.root.as_os_str().as_bytes()
-        } else {
-            entry.file_name().as_bytes()
-        };
+        let name: &[u8] = if depth == 0 { cfg.root.as_os_str().as_bytes() } else { entry.file_name().as_bytes() };
         let id = arena.push(parent, name, size, meta.mtime, flags);
         if ft.is_dir() {
             stack.push(id);

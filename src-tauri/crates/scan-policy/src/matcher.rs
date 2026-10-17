@@ -120,7 +120,13 @@ fn resolve_under(arena: &Arena, index: &ChildIndex, home: &Path, under: &Option<
     }
 }
 
-fn compile<'a>(idx: usize, rule: &'a Rule, arena: &Arena, index: &ChildIndex, ctx: &PolicyContext) -> Option<Compiled<'a>> {
+fn compile<'a>(
+    idx: usize,
+    rule: &'a Rule,
+    arena: &Arena,
+    index: &ChildIndex,
+    ctx: &PolicyContext,
+) -> Option<Compiled<'a>> {
     let m = &rule.matcher;
     let at = |p| resolve_path(arena, index, &ctx.home, p).ok();
     Some(Compiled {
@@ -241,14 +247,18 @@ impl<'a> Resolved<'a> {
     /// A trash rule also sets PROTECTED: the Trash itself is never swept.
     pub fn stamp(&self, arena: &mut Arena) -> PolicyHits {
         let mut found: HashMap<NodeId, (usize, Kind, Flags)> = HashMap::new();
-        self.each_match(arena, |k| k != Kind::Cleanup, |id, rule, kind| {
-            let entry = found.entry(id).or_insert((rule, kind, Flags::empty()));
-            entry.2 |= flag_of(kind);
-            let (best, best_kind) = (entry.0, entry.1);
-            if (severity(kind), std::cmp::Reverse(rule)) > (severity(best_kind), std::cmp::Reverse(best)) {
-                (entry.0, entry.1) = (rule, kind);
-            }
-        });
+        self.each_match(
+            arena,
+            |k| k != Kind::Cleanup,
+            |id, rule, kind| {
+                let entry = found.entry(id).or_insert((rule, kind, Flags::empty()));
+                entry.2 |= flag_of(kind);
+                let (best, best_kind) = (entry.0, entry.1);
+                if (severity(kind), std::cmp::Reverse(rule)) > (severity(best_kind), std::cmp::Reverse(best)) {
+                    (entry.0, entry.1) = (rule, kind);
+                }
+            },
+        );
         let mut hits = PolicyHits { rules: HashMap::with_capacity(found.len()) };
         for (id, (rule, _, flags)) in found {
             arena.flags[id as usize] |= flags;
@@ -261,12 +271,16 @@ impl<'a> Resolved<'a> {
     /// Nested matches are all reported; callers decide whether a match covers its descendants.
     pub fn cleanup_matches(&self, arena: &Arena) -> Vec<(NodeId, usize)> {
         let mut found: HashMap<NodeId, usize> = HashMap::new();
-        self.each_match(arena, |k| k == Kind::Cleanup, |id, rule, _| {
-            if !arena.flags[id as usize].contains(Flags::TRASHED) {
-                let best = found.entry(id).or_insert(rule);
-                *best = (*best).min(rule);
-            }
-        });
+        self.each_match(
+            arena,
+            |k| k == Kind::Cleanup,
+            |id, rule, _| {
+                if !arena.flags[id as usize].contains(Flags::TRASHED) {
+                    let best = found.entry(id).or_insert(rule);
+                    *best = (*best).min(rule);
+                }
+            },
+        );
         let mut out: Vec<_> = found.into_iter().collect();
         out.sort_unstable();
         out
