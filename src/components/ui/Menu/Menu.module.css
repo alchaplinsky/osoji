@@ -40,14 +40,24 @@
   min-width: 0;
 }
 
+.text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .icon {
   display: inline-flex;
   flex: none;
   color: var(--fg2);
 }
 .item:hover .icon { color: var(--fg); }
+.checked .icon, .checked:hover .icon { color: var(--ac); }
+.checked { font-weight: 600; }
 
 .hint {
+  flex: none;
+  margin-left: 8px;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--fg3);

@@ -14,7 +14,9 @@ const GB = 1024 ** 3;
 const HOME = "/Users/alex";
 const VOLUME: Volume = { name: "Macintosh HD", mount: "/", total: 1024 * GB, free: 412 * GB };
 const USED = VOLUME.total - VOLUME.free;
-const ROOTS: Record<RootChoice, string> = { disk: "/", home: HOME, folder: `${HOME}/Downloads` };
+const VOLUMES: Volume[] = [VOLUME, { name: "Backup", mount: "/Volumes/Backup", total: 2048 * GB, free: 1310 * GB }];
+const rootFor = (choice: RootChoice) =>
+  choice.kind === "volume" ? choice.mount : choice.kind === "home" ? HOME : `${HOME}/Downloads`;
 const STATUSES: ScanStatus[] = ["idle", "scanning", "done", "error"];
 const SCREENS: Screen[] = ["scan", "breakdown", "largest", "suggest", "settings"];
 
@@ -55,7 +57,8 @@ const MID_SCAN = mockProgress(0.35);
 const DONE = mockProgress(1);
 
 function rootLabel(root: string) {
-  if (root === VOLUME.mount) return VOLUME.name;
+  const volume = VOLUMES.find((v) => v.mount === root);
+  if (volume) return volume.name;
   if (root === HOME) return "your home folder";
   return root.startsWith(HOME) ? `~${root.slice(HOME.length)}` : root;
 }
@@ -117,7 +120,7 @@ export default function ShellPreview() {
   };
 
   const pickRoot = (choice: RootChoice) => {
-    setScanRoot(ROOTS[choice]);
+    setScanRoot(rootFor(choice));
     setStatus("idle");
     setProgress(null);
     setSummary(null);
@@ -128,7 +131,7 @@ export default function ShellPreview() {
 
   return (
     <div className={styles.window}>
-      <Sidebar volume={VOLUME} scanRoot={scanRoot} onPickRoot={pickRoot} scanned={status === "done"} screen={screen} onNavigate={setScreen} />
+      <Sidebar volume={VOLUME} volumes={VOLUMES} scanRoot={scanRoot} home={HOME} onPickRoot={pickRoot} scanned={status === "done"} screen={screen} onNavigate={setScreen} />
       <main className={styles.main}>
         {screen === "scan" && (
           <ScanScreen
