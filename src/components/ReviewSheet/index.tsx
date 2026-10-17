@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button, Sheet } from "../ui";
 import { humanBytes } from "../../lib/format";
 import type { BinItem } from "../../lib/types";
@@ -23,6 +23,16 @@ export default function ReviewSheet({ open, items, volumeName, busy, error, warn
     if (!busy) onCancel();
   }, [busy, onCancel]);
 
+  // With a warning, the first click only arms the button; the second one sweeps.
+  const [armed, setArmed] = useState(false);
+  useEffect(() => setArmed(false), [open, items]);
+  const needsArming = Boolean(warning) && !busy && !armed;
+  const confirm = () => (needsArming ? setArmed(true) : onConfirm());
+  const cancel = () => {
+    setArmed(false);
+    onCancel();
+  };
+
   return (
     <Sheet
       open={open}
@@ -42,9 +52,9 @@ export default function ReviewSheet({ open, items, volumeName, busy, error, warn
           )}
           <div className={styles.actions}>
             {error ? <div className={styles.error}>{error}</div> : warning && <div className={styles.warning}>{warning}</div>}
-            <Button size="lg" onClick={onCancel} disabled={busy}>Cancel</Button>
-            <Button variant="primary" size="lg" onClick={onConfirm} disabled={busy}>
-              {busy ? "Sweeping…" : `Move ${total} to Trash`}
+            <Button size="lg" onClick={cancel} disabled={busy}>Cancel</Button>
+            <Button variant="primary" size="lg" onClick={confirm} disabled={busy}>
+              {busy ? "Sweeping…" : warning && armed ? `Yes, move ${total} to Trash` : `Move ${total} to Trash`}
             </Button>
           </div>
         </>

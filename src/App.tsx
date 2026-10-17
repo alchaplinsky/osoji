@@ -16,6 +16,7 @@ import { useWatchers } from "./hooks/useWatchers";
 import { useBin } from "./hooks/useBin";
 import { useTheme } from "./hooks/useTheme";
 import { useSettings } from "./hooks/useSettings";
+import { useShortcuts } from "./hooks/useShortcuts";
 import { homeDir, nodeInfo, reveal, trashNodes, volumeInfo } from "./lib/api";
 import { humanBytes } from "./lib/format";
 import { expectedBytes } from "./lib/scanEstimate";
@@ -208,6 +209,18 @@ export default function App() {
 
   const canShow = (s: Screen) => s === "scan" || s === "settings" || (s === "watchers" ? watchersOn && scanned : scanned);
   const active = canShow(screen) ? screen : "scan";
+
+  useShortcuts(
+    {
+      "Meta+r": () => {
+        if (scan.status !== "scanning" && !sweeping) startScan();
+      },
+      "Meta+Enter": () => {
+        if (active === "breakdown") reveal(explorer.currentId).catch(console.error);
+      },
+    },
+    !review,
+  );
 
   const binProps = {
     binItems: bin.items,
