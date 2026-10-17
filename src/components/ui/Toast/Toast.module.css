@@ -9,10 +9,10 @@
   align-items: center;
   gap: 12px;
   border-radius: var(--radius-pill);
-  background: var(--card2);
+  background: var(--popover);
   border: 1px solid var(--line2);
   box-shadow: var(--shadow-float);
-  backdrop-filter: blur(20px);
+  backdrop-filter: blur(40px) saturate(1.4);
   animation: var(--kf-toastIn) .5s var(--ease-spring);
 }
 .icon {
