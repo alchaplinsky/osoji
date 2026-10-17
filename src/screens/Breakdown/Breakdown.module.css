@@ -9,17 +9,46 @@
 .menuAnchor { position: relative; }
 
 .body {
+  /* Height of the strip above the chart: the chart switcher and the list toggle share it. */
+  --strip-h: 34px;
+  /* Footprint of the chart switcher in the top-right corner; four 26px icons plus gaps, padding and border. */
+  --switcher-w: 118px;
+  /* Inset of the list toggle inside the open panel: the viz padding, but never flush against a panel card's corner. */
+  --panel-inset: max(var(--viz-pad), 10px);
+  --list-w: 336px;
+  /* One curve for everything that moves when the list opens or closes, so it all reads as a single motion. */
+  --list-dur: .4s;
+  --list-move: var(--list-dur) var(--ease-out);
   flex: 1;
   min-height: 0;
+  position: relative;
   display: flex;
-  gap: var(--body-gap);
   margin-top: var(--gap2);
 }
 
+/* With the list hidden, its toggle joins the switcher in the strip: one more square button plus the gap. */
+.listHidden { --switcher-w: 160px; }
+
+/* The list keeps its width inside a slot that collapses. Anchored to the slot's left edge, it slides out past the
+   window edge, where the clip sits; slack on the other three sides keeps the panel's shadow intact. */
+.listSlot {
+  flex: none;
+  width: var(--list-w);
+  min-height: 0;
+  margin-left: var(--body-gap);
+  display: flex;
+  clip-path: inset(-60px calc(-1 * var(--pad)) -60px -60px);
+  transition: width var(--list-move), margin-left var(--list-move), visibility 0s;
+}
+.listHidden .listSlot {
+  width: 0;
+  margin-left: 0;
+  /* Hidden only once the slide is over, so nothing off-screen stays focusable. */
+  visibility: hidden;
+  transition: width var(--list-move), margin-left var(--list-move), visibility 0s var(--list-dur);
+}
+
 .viz {
-  /* Footprint of the chart switcher in the top-right corner; four 26px icons plus gaps, padding and border. */
-  --switcher-w: 118px;
-  --switcher-h: 34px;
   flex: 1;
   min-width: 0;
   position: relative;
@@ -37,7 +66,7 @@
   align-items: safe center;
   justify-content: center;
   /* Top padding leaves the strip above the chart clear for the hover label and the chart switcher. */
-  padding: calc(var(--switcher-h) + 10px) 0 96px;
+  padding: calc(var(--strip-h) + 10px) 0 96px;
   container-type: size;
 }
 
@@ -59,7 +88,7 @@
   align-items: center;
   gap: 8px;
   max-width: calc(100% - var(--viz-pad) * 2 - var(--switcher-w) - 16px);
-  min-height: var(--switcher-h);
+  min-height: var(--strip-h);
   pointer-events: none;
 }
 
@@ -68,6 +97,26 @@
   top: var(--viz-pad);
   right: var(--viz-pad);
   z-index: 2;
+  transition: right var(--list-move);
+}
+.listHidden .vizSwitcher { right: calc(var(--viz-pad) + var(--strip-h) + 8px); }
+
+/* One button anchored to the body's corner, so it keeps its size and barely moves as the panel comes and goes:
+   in the strip beside the switcher while the list is hidden, inside the panel header once it is open. */
+.listToggle {
+  position: absolute;
+  top: var(--viz-pad);
+  right: var(--viz-pad);
+  z-index: 3;
+  width: var(--strip-h);
+  height: var(--strip-h);
+  /* Opaque: `--card` is translucent in some themes, and the panel heading slides underneath this button. */
+  background: linear-gradient(var(--card), var(--card)), var(--bg);
+  transition: top var(--list-move), right var(--list-move);
+}
+.listOpen .listToggle {
+  top: var(--panel-inset);
+  right: var(--panel-inset);
 }
 
 .hoverSwatch {

@@ -1,23 +1,27 @@
+/* Fixed width (`--list-w` from the breakdown body) so the rows hold still while the slot around the panel collapses. */
 .panel {
-  width: 336px;
+  width: var(--list-w);
   flex: none;
   display: flex;
   flex-direction: column;
   min-height: 0;
   border-left-color: var(--line);
-  animation: var(--kf-springIn) .45s var(--ease-spring-soft);
 }
 
+/* The list toggle floats over the header's top-right corner (see Breakdown.module.css); leave it room and
+   centre the text on it. `--panel-inset` and `--strip-h` come from the breakdown body. */
 .header {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
   gap: 10px;
-  padding: 14px 16px 10px;
+  min-height: calc(var(--panel-inset) + var(--strip-h) + 10px);
+  padding: var(--panel-inset) calc(var(--panel-inset) + var(--strip-h) + 10px) 10px 16px;
   border-bottom: 1px solid var(--line);
 }
 
 .heading {
+  flex: 1;
+  min-width: 0;
   font-size: 13.5px;
   font-weight: 600;
   white-space: nowrap;

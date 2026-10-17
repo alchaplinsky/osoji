@@ -8,20 +8,15 @@ import styles from "./Breakdown.module.css";
 type BreakdownToolbarProps = {
   info: NodeInfo;
   onNavigate: (id: number) => void;
-  listOpen: boolean;
-  onToggleList: () => void;
   onRescan: () => void;
   onReveal: () => void;
 };
 
-export default function BreakdownToolbar({ info, onNavigate, listOpen, onToggleList, onRescan, onReveal }: BreakdownToolbarProps) {
+export default function BreakdownToolbar({ info, onNavigate, onRescan, onReveal }: BreakdownToolbarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   return (
     <Toolbar>
       <Breadcrumbs ancestors={info.ancestors} current={{ id: info.id, name: info.name }} onNavigate={onNavigate} />
-      <IconButton active={listOpen} title="Toggle list" onClick={onToggleList}>
-        <Icon name="list" />
-      </IconButton>
       <div className={styles.menuAnchor}>
         <IconButton title="More" onClick={() => setMenuOpen((o) => !o)}>
           <Icon name="more" />

@@ -3,6 +3,8 @@
   height: 100%;
   padding: var(--pad);
   gap: var(--pad);
+  /* The window never scrolls; anything that slides off its edge (the breakdown list panel) is just clipped. */
+  overflow: hidden;
 }
 
 .main {
