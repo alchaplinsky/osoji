@@ -24,7 +24,7 @@ export default function Breadcrumbs({ ancestors, current, onNavigate }: Breadcru
               title={drive ? c.name : undefined}
               onClick={() => onNavigate(c.id)}
             >
-              {drive ? <HardDrive size={14} strokeWidth={1.75} /> : c.name}
+              {drive ? <HardDrive size={14} strokeWidth={1.75} /> : <span>{c.name}</span>}
             </button>
           </div>
         );

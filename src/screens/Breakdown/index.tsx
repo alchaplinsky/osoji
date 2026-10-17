@@ -44,6 +44,7 @@ const HINTS: Record<Viz, string> = {
 };
 
 const VIEWS: Record<Viz, ComponentType<VizProps>> = { sunburst: Sunburst, treemap: Treemap, shelf: Shelf, orbit: Orbit };
+const RADIAL: ReadonlySet<Viz> = new Set(["sunburst", "orbit"]);
 
 export default function BreakdownScreen({
   volume,
@@ -81,6 +82,7 @@ export default function BreakdownScreen({
     onUp,
     onSelectFile: onToggleBin,
     centerSize: listOpen ? 20 : 24,
+    className: RADIAL.has(viz) ? styles.radial : undefined,
   };
 
   return (
