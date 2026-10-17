@@ -160,8 +160,8 @@ match = { path = "~/Library/Application Support" }
 
 [[rule]]
 id = "trash"
-kind = "protected"
-reason = "Already in the Trash. Empty the Trash from Finder."
+kind = "trash"
+reason = "Already in the Trash. Empty the Trash from Finder to reclaim the space."
 match = { parent = "~", name = ".Trash", dir = true }
 
 # Risky: allowed, but the review asks twice.
@@ -253,20 +253,6 @@ kind = "cleanup"
 safety = "keep"
 reason = "Your photos. Unshift never suggests removing these."
 match = { suffix = ".photoslibrary", dir = true }
-
-[[rule]]
-id = "keep-swap"
-kind = "cleanup"
-safety = "keep"
-reason = "Swap files. macOS manages these itself."
-match = { path = "/private/var/vm" }
-
-[[rule]]
-id = "keep-system"
-kind = "cleanup"
-safety = "keep"
-reason = "Protected by macOS and cannot be changed."
-match = { path = "/System" }
 
 [[rule]]
 id = "app-cache"

@@ -19,6 +19,8 @@ export type TrashResult = { bytes: number; count: number; trashed: number[]; fai
 export type TrashProgress = { done: number; total: number; bytes: number; current: string };
 export type VolumeInfo = { name: string; mount: string; total: number; free: number };
 export type WatchHit = { path: string; id: number | null; size: number; dir: boolean };
+/** The user's Trash folder; `items` counts its top-level entries, as Finder does. */
+export type TrashInfo = { id: number; path: string; size: number; items: number };
 
 export function startScan(root: string, onProgress: (p: ProgressMsg) => void): Promise<ScanSummary> {
   const channel = new Channel<ProgressMsg>();
@@ -41,6 +43,8 @@ export function trashNodes(nodes: number[], onProgress: (p: TrashProgress) => vo
   channel.onmessage = onProgress;
   return invoke<TrashResult>("trash_nodes", { nodes, onProgress: channel });
 }
+export const trashInfo = () => invoke<TrashInfo | null>("trash_info");
+export const showTrash = () => invoke<void>("show_trash");
 export const homeDir = () => invoke<string>("home_dir");
 export const volumeInfo = (path: string) => invoke<VolumeInfo>("volume_info", { path });
 export const fullDiskAccess = () => invoke<boolean>("full_disk_access");

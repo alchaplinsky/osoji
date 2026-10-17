@@ -14,11 +14,13 @@ const item = (id: number, guard: Guard | null = null, ancestors: number[] = []):
 
 const PROTECTED: Guard = { kind: "protected", reason: "Part of macOS." };
 const RISKY: Guard = { kind: "risky", reason: "Your photo library." };
+const TRASH: Guard = { kind: "trash", reason: "Already in the Trash." };
 
 describe("withItem", () => {
-  test("never queues protected items", () => {
+  test("never queues protected items or the Trash", () => {
     const queued = [item(1)];
     expect(withItem(queued, item(2, PROTECTED))).toBe(queued);
+    expect(withItem(queued, item(3, TRASH))).toBe(queued);
   });
 
   test("queues risky items and lets an ancestor replace its descendants", () => {

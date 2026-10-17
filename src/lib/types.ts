@@ -6,8 +6,8 @@ export type Volume = { name: string; mount: string; total: number; free: number 
 
 export type HoverId = number | "other" | null;
 
-/** Why a node needs care, from the backend policy: protected items never reach the bin, risky ones ask twice. */
-export type Guard = { kind: "protected" | "risky" | "unexpected"; reason: string };
+/** Why a node needs care, from the backend policy: protected items and the Trash never reach the bin, risky ones ask twice. */
+export type Guard = { kind: "protected" | "risky" | "unexpected" | "trash"; reason: string };
 
 export type BinItem = { id: number; name: string; path: string; size: number; dir: boolean; ancestors: number[]; guard?: Guard | null };
 

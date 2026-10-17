@@ -11,11 +11,13 @@ pub enum Kind {
     Risky,
     Cleanup,
     Unexpected,
+    Trash,
 }
 
 impl Kind {
     pub fn as_str(self) -> &'static str {
         match self {
+            Kind::Trash => "trash",
             Kind::Protected => "protected",
             Kind::Risky => "risky",
             Kind::Cleanup => "cleanup",

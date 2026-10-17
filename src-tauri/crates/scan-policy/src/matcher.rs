@@ -61,7 +61,7 @@ pub struct PolicyHits {
 }
 
 impl PolicyHits {
-    /// Index of the rule behind a node's PROTECTED, RISKY or UNEXPECTED flag.
+    /// Index of the rule behind a node's TRASH_FOLDER, PROTECTED, RISKY or UNEXPECTED flag.
     pub fn rule(&self, id: NodeId) -> Option<usize> {
         self.rules.get(&id).copied()
     }
@@ -81,6 +81,7 @@ impl PolicyHits {
 
 fn flag_of(kind: Kind) -> Flags {
     match kind {
+        Kind::Trash => Flags::TRASH_FOLDER | Flags::PROTECTED,
         Kind::Protected => Flags::PROTECTED,
         Kind::Risky => Flags::RISKY,
         Kind::Unexpected => Flags::UNEXPECTED,
@@ -90,6 +91,7 @@ fn flag_of(kind: Kind) -> Flags {
 
 fn severity(kind: Kind) -> u8 {
     match kind {
+        Kind::Trash => 4,
         Kind::Protected => 3,
         Kind::Risky => 2,
         Kind::Unexpected => 1,
@@ -234,8 +236,9 @@ impl<'a> Resolved<'a> {
         }
     }
 
-    /// Set PROTECTED, RISKY and UNEXPECTED on every matching node and record, per node, the strongest
-    /// rule (protected over risky over unexpected, then the earliest in the file).
+    /// Set TRASH_FOLDER, PROTECTED, RISKY and UNEXPECTED on every matching node and record, per node, the
+    /// strongest rule (trash over protected over risky over unexpected, then the earliest in the file).
+    /// A trash rule also sets PROTECTED: the Trash itself is never swept.
     pub fn stamp(&self, arena: &mut Arena) -> PolicyHits {
         let mut found: HashMap<NodeId, (usize, Kind, Flags)> = HashMap::new();
         self.each_match(arena, |k| k != Kind::Cleanup, |id, rule, kind| {
