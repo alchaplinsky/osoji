@@ -48,9 +48,16 @@
   padding: 8px;
   border-radius: var(--radius-md);
   transition: background .2s;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .rowDraggable { cursor: grab; }
+.rowOpenable { cursor: pointer; }
 .rowHovered { background: var(--card2); }
+.rowOpenable:focus-visible {
+  outline: 2px solid var(--ac);
+  outline-offset: -2px;
+}
 
 .swatch {
   width: 10px;
@@ -65,7 +72,6 @@
   align-items: center;
   gap: 6px;
 }
-.titleDir { cursor: pointer; }
 
 .name {
   font-size: 13px;
