@@ -11,7 +11,7 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::ffi::{CStr, CString};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
@@ -28,6 +28,9 @@ struct AppState {
     scan: Mutex<Option<Scan>>,
     cancel: Mutex<Option<Arc<Cancel>>>,
     running: AtomicBool,
+    /// Bumped each time `scan` is replaced, so a sweep can tell its arena went stale.
+    generation: AtomicU64,
+    sweeping: AtomicBool,
 }
 
 #[derive(Serialize, Clone)]
@@ -98,6 +101,15 @@ struct TrashResult {
     count: usize,
     trashed: Vec<NodeId>,
     failed: Vec<String>,
+}
+
+#[derive(Serialize, Clone)]
+struct TrashProgress {
+    done: usize,
+    total: usize,
+    bytes: u64,
+    /// Name of the item being moved.
+    current: String,
 }
 
 #[derive(Serialize)]
@@ -199,6 +211,9 @@ async fn start_scan(
     threads: Option<usize>,
     on_progress: Channel<ProgressMsg>,
 ) -> Result<ScanSummary, String> {
+    if state.sweeping.load(Ordering::Acquire) {
+        return Err("wait for the sweep to finish".into());
+    }
     if state.running.swap(true, Ordering::AcqRel) {
         return Err("a scan is already running".into());
     }
@@ -265,7 +280,9 @@ async fn start_scan(
     // last complete scan.
     if !cancelled {
         let index = ChildIndex::build(&arena);
-        *state.scan.lock().unwrap() = Some(Scan { root: cfg.root, arena, index });
+        let mut slot = state.scan.lock().unwrap();
+        *slot = Some(Scan { root: cfg.root, arena, index });
+        state.generation.fetch_add(1, Ordering::AcqRel);
     }
     Ok(summary)
 }
@@ -654,29 +671,79 @@ fn reveal(state: State<'_, AppState>, node: NodeId) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn trash_nodes(state: State<'_, AppState>, nodes: Vec<NodeId>) -> Result<TrashResult, String> {
+async fn trash_nodes(
+    state: State<'_, AppState>,
+    nodes: Vec<NodeId>,
+    on_progress: Channel<TrashProgress>,
+) -> Result<TrashResult, String> {
+    if state.sweeping.swap(true, Ordering::AcqRel) {
+        return Err("a sweep is already running".into());
+    }
+    let result = sweep(&state, nodes, on_progress).await;
+    state.sweeping.store(false, Ordering::Release);
+    result
+}
+
+/// Moves nodes to the Trash without holding the scan lock during the slow part:
+/// validate under the lock, delete off the main thread, then re-lock to mark.
+async fn sweep(state: &AppState, nodes: Vec<NodeId>, on_progress: Channel<TrashProgress>) -> Result<TrashResult, String> {
+    let (generation, items) = {
+        let guard = state.scan.lock().unwrap();
+        let scan = guard.as_ref().ok_or("no scan loaded")?;
+        let mut items = Vec::new();
+        for id in nodes {
+            if (id as usize) >= scan.arena.len() || id == 0 {
+                continue;
+            }
+            if scan.arena.flags[id as usize].contains(Flags::TRASHED) {
+                continue;
+            }
+            let path = scan.arena.path(id);
+            if !path.starts_with(&scan.root) {
+                return Err(format!("refusing to trash {} outside the scan root", path.display()));
+            }
+            items.push((id, path, name_of(&scan.arena, id), scan.arena.size[id as usize]));
+        }
+        (state.generation.load(Ordering::Acquire), items)
+    };
+
+    let total = items.len();
+    let outcomes = tauri::async_runtime::spawn_blocking(move || {
+        let mut bytes = 0u64;
+        let mut current = String::new();
+        let mut outcomes = Vec::with_capacity(total);
+        for (done, (id, path, name, size)) in items.into_iter().enumerate() {
+            current = name;
+            let _ = on_progress.send(TrashProgress { done, total, bytes, current: current.clone() });
+            let outcome = trash::delete(&path).map_err(|e| format!("{}: {e}", path.display()));
+            if outcome.is_ok() {
+                bytes += size;
+            }
+            outcomes.push((id, size, outcome));
+        }
+        let _ = on_progress.send(TrashProgress { done: total, total, bytes, current });
+        outcomes
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
     let mut guard = state.scan.lock().unwrap();
-    let scan = guard.as_mut().ok_or("no scan loaded")?;
+    // A scan that finished meanwhile replaced the arena: the ids no longer point at what was deleted.
+    let mut live = guard.as_mut().filter(|_| state.generation.load(Ordering::Acquire) == generation);
     let mut bytes = 0u64;
     let mut trashed = Vec::new();
     let mut failed = Vec::new();
-    for id in nodes {
-        if (id as usize) >= scan.arena.len() || id == 0 {
+    for (id, size, outcome) in outcomes {
+        if let Err(e) = outcome {
+            failed.push(e);
             continue;
         }
-        if scan.arena.flags[id as usize].contains(Flags::TRASHED) {
-            continue;
-        }
-        let path = scan.arena.path(id);
-        if !path.starts_with(&scan.root) {
-            return Err(format!("refusing to trash {} outside the scan root", path.display()));
-        }
-        if let Err(e) = trash::delete(&path) {
-            failed.push(format!("{}: {e}", path.display()));
-            continue;
-        }
-        bytes += scan.arena.mark_trashed(id);
         trashed.push(id);
+        let Some(scan) = live.as_deref_mut() else {
+            bytes += size;
+            continue;
+        };
+        bytes += scan.arena.mark_trashed(id);
         let parent = scan.arena.parent[id as usize];
         let mut p = parent;
         while p != NONE {

@@ -20,6 +20,7 @@ import { useSettings } from "./hooks/useSettings";
 import { useFullDiskAccess } from "./hooks/useFullDiskAccess";
 import { useShortcuts } from "./hooks/useShortcuts";
 import { homeDir, nodeInfo, reveal, trashNodes, volumeInfo } from "./lib/api";
+import type { TrashProgress } from "./lib/api";
 import { humanBytes } from "./lib/format";
 import { expectedBytes } from "./lib/scanEstimate";
 import { useScanTotals } from "./hooks/useScanTotals";
@@ -51,6 +52,7 @@ export default function App() {
   const [review, setReview] = useState(false);
   const [sweeping, setSweeping] = useState(false);
   const [sweepError, setSweepError] = useState<string | null>(null);
+  const [sweepProgress, setSweepProgress] = useState<TrashProgress | null>(null);
   const [toast, setToast] = useState<{ title: string; sub: string } | null>(null);
   const toastTimer = useRef<number>();
 
@@ -173,7 +175,7 @@ export default function App() {
     setSweeping(true);
     setSweepError(null);
     try {
-      const result = await trashNodes(bin.items.map((i) => i.id));
+      const result = await trashNodes(bin.items.map((i) => i.id), setSweepProgress);
       const here = [explorer.currentId, ...(explorer.info?.ancestors.map((a) => a.id) ?? [])];
       const moved = new Set(result.trashed);
       const trashedHere = bin.items.find((i) => moved.has(i.id) && here.includes(i.id));
@@ -191,6 +193,7 @@ export default function App() {
       setSweepError(String(e));
     } finally {
       setSweeping(false);
+      setSweepProgress(null);
     }
   };
 
@@ -327,6 +330,7 @@ export default function App() {
         items={bin.items}
         volumeName={volume?.name ?? "this disk"}
         busy={sweeping}
+        progress={sweepProgress}
         error={sweepError}
         warning={warning}
         onCancel={() => {
