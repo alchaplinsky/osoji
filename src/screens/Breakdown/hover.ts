@@ -5,7 +5,7 @@ import type { HoverId } from "../../lib/types";
 import { findNode, pathTo } from "../../lib/tree";
 import type { Slice } from "./slices";
 
-export type HoverTarget = { name: string; size: number; pct: number; fill: string };
+export type HoverTarget = { name: string; size: number; pct: number; fill: string; error: boolean };
 
 /**
  * Name, size, share and swatch colour of the hovered slice, looked up in `view` first, then in `root`.
@@ -16,14 +16,14 @@ export function hoverTarget(view: ViewNode, root: ViewNode, theme: ThemeName, ho
   if (hoverId === "other") {
     const name = other?.name ?? `${view.other_count} smaller items`;
     const size = other?.size ?? view.other;
-    return { name, size, pct: share(size, view), fill: neutral(theme) };
+    return { name, size, pct: share(size, view), fill: neutral(theme), error: false };
   }
   for (const tree of [view, root]) {
     const path = pathTo(tree, hoverId);
     const node = path.at(-1);
     if (!node || path.length < 2) continue;
     const top = tree.children.indexOf(path[1]);
-    return { name: node.name, size: node.size, pct: share(node.size, tree), fill: tone(theme, top) };
+    return { name: node.name, size: node.size, pct: share(node.size, tree), fill: tone(theme, top), error: node.error };
   }
   return null;
 }

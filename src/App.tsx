@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import Sidebar from "./components/Sidebar";
 import ReviewSheet from "./components/ReviewSheet";
+import FdaBanner from "./components/FdaBanner";
 import { Toast } from "./components/ui";
 import ScanScreen, { SCAN_SETTLE_MS } from "./screens/Scan";
 import BreakdownScreen from "./screens/Breakdown";
@@ -16,6 +17,7 @@ import { useWatchers } from "./hooks/useWatchers";
 import { useBin } from "./hooks/useBin";
 import { useTheme } from "./hooks/useTheme";
 import { useSettings } from "./hooks/useSettings";
+import { useFullDiskAccess } from "./hooks/useFullDiskAccess";
 import { homeDir, nodeInfo, reveal, trashNodes, volumeInfo } from "./lib/api";
 import { humanBytes } from "./lib/format";
 import { expectedBytes } from "./lib/scanEstimate";
@@ -34,6 +36,7 @@ export default function App() {
   const watchers = useWatchers();
   const bin = useBin();
   const { theme } = useTheme();
+  const fda = useFullDiskAccess();
   const { confirmBig, watchers: watchersOn } = useSettings();
   const [screen, setScreen] = useState<Screen>("scan");
   const [viz, setViz] = useState<Viz>("sunburst");
@@ -122,6 +125,8 @@ export default function App() {
         ? "~" + scanRoot.slice(home.length)
         : scanRoot;
   const scanned = scan.status === "done" && explorer.view !== null;
+  const unreadable = scan.summary?.errors ?? 0;
+  const askForAccess = unreadable > 0 && fda.granted === false && !fda.dismissed;
 
   const startScan = () => {
     setScreen("scan");
@@ -268,6 +273,7 @@ export default function App() {
             onRescan={startScan}
             onReveal={() => reveal(explorer.currentId).catch(console.error)}
             onToggleBin={toggleBinById}
+            banner={askForAccess && <FdaBanner unreadable={unreadable} onOpenSettings={fda.openSettings} onDismiss={fda.dismiss} />}
             {...binProps}
           />
         )}
