@@ -111,6 +111,12 @@
   text-overflow: ellipsis;
 }
 
+.lock {
+  display: flex;
+  flex: none;
+  color: var(--review);
+}
+
 .chevron {
   color: var(--fg2);
   opacity: .5;
