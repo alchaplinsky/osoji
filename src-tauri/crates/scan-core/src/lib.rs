@@ -14,7 +14,7 @@ pub const NONE: NodeId = u32::MAX;
 
 bitflags! {
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-    pub struct Flags: u8 {
+    pub struct Flags: u16 {
         const DIR = 1;
         const SYMLINK = 2;
         const HARDLINK_DUP = 4;
@@ -22,6 +22,11 @@ bitflags! {
         const EXCLUDED = 16;
         const ERROR = 32;
         const TRASHED = 64;
+        const PROTECTED = 128;
+        const RISKY = 256;
+        const UNEXPECTED = 512;
+        /// The user's Trash folder: real space, but never swept and never suggested.
+        const TRASH_FOLDER = 1024;
     }
 }
 

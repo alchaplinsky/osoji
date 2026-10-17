@@ -1,0 +1,9 @@
+.icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.protected { color: var(--keep); }
+.risky { color: var(--review); }
+.trash { color: var(--fg3); }

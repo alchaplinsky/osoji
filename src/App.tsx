@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react
 import { open } from "@tauri-apps/plugin-dialog";
 import Sidebar, { type RootChoice } from "./components/Sidebar";
 import ReviewSheet from "./components/ReviewSheet";
+import FdaBanner from "./components/FdaBanner";
 import { Toast } from "./components/ui";
 import ScanScreen, { SCAN_SETTLE_MS } from "./screens/Scan";
 import BreakdownScreen from "./screens/Breakdown";
@@ -16,9 +17,13 @@ import { useWatchers } from "./hooks/useWatchers";
 import { useBin } from "./hooks/useBin";
 import { useTheme } from "./hooks/useTheme";
 import { useSettings } from "./hooks/useSettings";
+import { useFullDiskAccess } from "./hooks/useFullDiskAccess";
+import { useShortcuts } from "./hooks/useShortcuts";
 import { useItemMenu } from "./hooks/useItemMenu";
-import { homeDir, nodeInfo, reveal, trashNodes, volumeInfo, volumes as listVolumes } from "./lib/api";
+import { homeDir, nodeInfo, reveal, trashInfo, trashNodes, volumeInfo, volumes as listVolumes } from "./lib/api";
+import type { TrashInfo, TrashProgress } from "./lib/api";
 import { humanBytes } from "./lib/format";
+import { isProtected, reviewWarning } from "./lib/bin";
 import { expectedBytes } from "./lib/scanEstimate";
 import { useScanTotals } from "./hooks/useScanTotals";
 import { pathTo } from "./lib/tree";
@@ -36,6 +41,7 @@ export default function App() {
   const bin = useBin();
   const itemMenu = useItemMenu();
   const { theme } = useTheme();
+  const fda = useFullDiskAccess();
   const { confirmBig, watchers: watchersOn } = useSettings();
   const [screen, setScreen] = useState<Screen>("scan");
   const [viz, setViz] = useState<Viz>("sunburst");
@@ -50,8 +56,11 @@ export default function App() {
   const [review, setReview] = useState(false);
   const [sweeping, setSweeping] = useState(false);
   const [sweepError, setSweepError] = useState<string | null>(null);
+  const [sweepProgress, setSweepProgress] = useState<TrashProgress | null>(null);
   const [toast, setToast] = useState<{ title: string; sub: string } | null>(null);
   const toastTimer = useRef<number>();
+  const [trash, setTrash] = useState<TrashInfo | null>(null);
+  const loadTrash = useCallback(() => trashInfo().then(setTrash), []);
 
   useEffect(() => {
     homeDir().then(setHome).catch(console.error);
@@ -95,12 +104,12 @@ export default function App() {
       if (completed) remember(done.root, done.bytes);
       setFinishing(completed);
       const settle = new Promise((resolve) => setTimeout(resolve, completed ? SCAN_SETTLE_MS : 0));
-      Promise.all([load(0), loadInsights(), refreshWatchers(), settle])
+      Promise.all([load(0), loadInsights(), refreshWatchers(), loadTrash(), settle])
         .then(() => setScreen("breakdown"))
         .catch(console.error)
         .finally(() => setFinishing(false));
     }
-  }, [scan.status, scan.summary, load, reset, loadInsights, resetInsights, refreshWatchers, resetWatchers, clearBin, remember]);
+  }, [scan.status, scan.summary, load, reset, loadInsights, resetInsights, refreshWatchers, resetWatchers, clearBin, remember, loadTrash]);
 
   const changeRoot = useCallback(
     (next: string) => {
@@ -135,6 +144,8 @@ export default function App() {
           ? "Startup Disk"
           : scanRoot;
   const scanned = scan.status === "done" && explorer.view !== null;
+  const unreadable = scan.summary?.errors ?? 0;
+  const askForAccess = unreadable > 0 && fda.granted === false && !fda.dismissed;
 
   const startScan = () => {
     setScreen("scan");
@@ -161,6 +172,7 @@ export default function App() {
       size: node.size,
       dir: node.dir,
       ancestors: [...info.ancestors.map((a) => a.id), info.id, ...below.slice(0, -1).map((n) => n.id)],
+      guard: node.guard ?? null,
     };
   };
 
@@ -173,7 +185,7 @@ export default function App() {
 
   const openNodeMenu = (e: MouseEvent, id: number) => {
     const item = describe(id);
-    if (item) itemMenu.open(e, { id, path: item.path, inBin: bin.ids.has(id), onToggleBin: () => bin.toggle(item) });
+    if (item) itemMenu.open(e, { id, path: item.path, inBin: bin.ids.has(id), onToggleBin: isProtected(item) ? undefined : () => bin.toggle(item) });
   };
 
   const openReviewMenu = (e: MouseEvent, item: BinItem) =>
@@ -190,12 +202,12 @@ export default function App() {
     setSweeping(true);
     setSweepError(null);
     try {
-      const result = await trashNodes(bin.items.map((i) => i.id));
+      const result = await trashNodes(bin.items.map((i) => i.id), setSweepProgress);
       const here = [explorer.currentId, ...(explorer.info?.ancestors.map((a) => a.id) ?? [])];
       const moved = new Set(result.trashed);
       const trashedHere = bin.items.find((i) => moved.has(i.id) && here.includes(i.id));
       result.trashed.forEach(bin.remove);
-      await Promise.all([explorer.refresh(trashedHere ? (trashedHere.ancestors.at(-1) ?? 0) : explorer.currentId), insights.load(), watchers.refresh()]);
+      await Promise.all([explorer.refresh(trashedHere ? (trashedHere.ancestors.at(-1) ?? 0) : explorer.currentId), insights.load(), watchers.refresh(), loadTrash()]);
       setHoverId(null);
       if (result.failed.length > 0) {
         setSweepError(result.failed.join("\n"));
@@ -208,11 +220,12 @@ export default function App() {
       setSweepError(String(e));
     } finally {
       setSweeping(false);
+      setSweepProgress(null);
     }
   };
 
   const bigCount = confirmBig ? bin.items.filter((i) => i.size >= BIG_ITEM).length : 0;
-  const warning = bigCount > 0 ? `${bigCount === 1 ? "1 item is" : `${bigCount} items are`} over 1 GB. Double-check before you continue.` : undefined;
+  const warning = reviewWarning(bin.items, bigCount);
 
   const addWatcher = async () => {
     const dir = await open({ directory: true, multiple: false, defaultPath: home || scanRoot });
@@ -232,6 +245,18 @@ export default function App() {
   const canShow = (s: Screen) => s === "scan" || s === "settings" || (s === "watchers" ? watchersOn && scanned : scanned);
   const active = canShow(screen) ? screen : "scan";
 
+  useShortcuts(
+    {
+      "Meta+r": () => {
+        if (scan.status !== "scanning" && !sweeping) startScan();
+      },
+      "Meta+Enter": () => {
+        if (active === "breakdown") reveal(explorer.currentId).catch(console.error);
+      },
+    },
+    !review,
+  );
+
   const binProps = {
     binItems: bin.items,
     binIds: bin.ids,
@@ -248,6 +273,7 @@ export default function App() {
         home={home}
         rootPickerDisabled={scan.status === "scanning" || sweeping}
         onPickRoot={pickRoot}
+        trash={trash}
         scanned={scanned}
         screen={active}
         suggestBadge={scanned && insights.safeTotal > 0 ? humanBytes(insights.safeTotal) : undefined}
@@ -295,7 +321,8 @@ export default function App() {
             onRevealItem={revealItem}
             onItemMenu={openNodeMenu}
             onToggleBin={toggleBinById}
-            unreadable={scan.summary?.errors}
+            banner={askForAccess && <FdaBanner unreadable={unreadable} onOpenSettings={fda.openSettings} onDismiss={fda.dismiss} />}
+            unreadable={unreadable}
             {...binProps}
           />
         )}
@@ -338,6 +365,7 @@ export default function App() {
         items={bin.items}
         volumeName={volume?.name ?? "this disk"}
         busy={sweeping}
+        progress={sweepProgress}
         error={sweepError}
         warning={warning}
         onCancel={() => {

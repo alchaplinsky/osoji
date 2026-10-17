@@ -1,5 +1,6 @@
 import type { ThemeName } from "../../design/theme";
-import { neutral, tone } from "../../design/palette";
+import { neutral } from "../../design/palette";
+import { nodeFill } from "../../screens/Breakdown/slices";
 import { MAX_DEPTH, relatedOpacity, type Arc, type SliceKey } from "./layout";
 
 export type Geometry = { cx: number; cy: number; r0: number; ring: number };
@@ -18,7 +19,7 @@ export function readColors(el: Element): Colors {
   return { bg: v("--bg"), card: v("--card"), line: v("--line") };
 }
 
-export const arcFill = (theme: ThemeName, arc: Arc) => (arc.node ? tone(theme, arc.index, arc.depth) : neutral(theme));
+export const arcFill = (theme: ThemeName, arc: Arc) => (arc.node ? nodeFill(arc.node, theme, arc.index, arc.depth) : neutral(theme));
 
 const RING_GAP = 3;
 

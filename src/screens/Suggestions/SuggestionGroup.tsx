@@ -1,5 +1,5 @@
 import { Mono, cx } from "../../components/ui";
-import { toBinItem } from "../../lib/bin";
+import { isProtected, toBinItem } from "../../lib/bin";
 import type { OpenItemMenu } from "../../hooks/useItemMenu";
 import { humanBytes } from "../../lib/format";
 import type { BinItem, Safety, Suggestion } from "../../lib/types";
@@ -40,8 +40,8 @@ export default function SuggestionGroup({ safety, title, desc, items, binIds, on
                   id: s.id,
                   path: s.path,
                   inBin: binIds.has(s.id),
-                  // "Keep" suggestions have no bin button on the card, so the menu offers none either.
-                  onToggleBin: s.safety === "keep" ? undefined : () => onToggleBin(toBinItem(s)),
+                  // The card offers a bin button only for safe and review items; the menu matches it.
+                  onToggleBin: s.safety === "safe" || s.safety === "review" ? (isProtected(s) ? undefined : () => onToggleBin(toBinItem(s))) : undefined,
                 }))
             }
           />

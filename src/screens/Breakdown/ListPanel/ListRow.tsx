@@ -1,5 +1,8 @@
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
+import { Lock } from "lucide-react";
 import { Checkbox, Icon, Mono, cx } from "../../../components/ui";
+import GuardIcon from "../../../components/GuardIcon";
+import type { Guard } from "../../../lib/types";
 import styles from "./ListPanel.module.css";
 
 type ListRowProps = {
@@ -8,8 +11,10 @@ type ListRowProps = {
   color: string;
   pct: number;
   dir: boolean;
+  locked?: boolean;
   hovered: boolean;
   inBin: boolean;
+  guard: Guard | null;
   onEnter: () => void;
   onLeave: () => void;
   onOpen?: () => void;
@@ -19,7 +24,7 @@ type ListRowProps = {
   onContextMenu?: (e: MouseEvent<HTMLDivElement>) => void;
 };
 
-export default function ListRow({ name, sizeLabel, color, pct, dir, hovered, inBin, onEnter, onLeave, onOpen, onToggleBin, onDragStart, onReveal, onContextMenu }: ListRowProps) {
+export default function ListRow({ name, sizeLabel, color, pct, dir, locked, hovered, inBin, guard, onEnter, onLeave, onOpen, onToggleBin, onDragStart, onReveal, onContextMenu }: ListRowProps) {
   const binnable = !!onToggleBin;
   const open = dir ? onOpen : undefined;
   const onKeyDown = open
@@ -56,7 +61,13 @@ export default function ListRow({ name, sizeLabel, color, pct, dir, hovered, inB
       <div className={styles.body}>
         <div className={styles.title}>
           <span className={styles.name}>{name}</span>
-          {dir && <Icon name="chevronRightSm" className={styles.chevron} />}
+          <GuardIcon guard={guard} />
+          {locked && (
+            <span className={styles.lock} role="img" title="Can't read this folder" aria-label="Can't read this folder">
+              <Lock size={11} />
+            </span>
+          )}
+          {dir &&<Icon name="chevronRightSm" className={styles.chevron} />}
         </div>
         <div className={styles.track}>
           <div className={styles.fill} style={{ width: `${pct}%`, background: color }} />

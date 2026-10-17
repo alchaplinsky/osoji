@@ -1,0 +1,4 @@
+.banner {
+  flex: none;
+  margin-top: var(--gap1);
+}

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = [".", "crates/scan-core", "crates/scan-macos", "crates/scan-cli"]
+members = [".", "crates/scan-core", "crates/scan-macos", "crates/scan-cli", "crates/scan-policy"]
 
 [workspace.package]
 edition = "2021"
@@ -26,6 +26,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 scan-core = { path = "crates/scan-core" }
 scan-macos = { path = "crates/scan-macos" }
+scan-policy = { path = "crates/scan-policy" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }

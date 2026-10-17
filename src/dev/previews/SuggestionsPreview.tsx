@@ -29,6 +29,7 @@ const SUGGESTIONS: Suggestion[] = [
   suggestion("/Users/alex/Downloads/Xcode_16.xip", 11.8, "review", "In Downloads for 4 months, and probably already used.", 125),
   suggestion("/Users/alex/Pictures/Photos Library.photoslibrary", 44.4, "keep", "Your photos. Unshift never suggests removing these."),
   suggestion("/private/var/vm", 12, "keep", "Swap files. macOS manages these itself."),
+  suggestion("/Users/alex/.ollama", 9.4, "unexpected", "A hidden folder in your home that has grown large."),
 ].sort((a, b) => b.size - a.size);
 
 const PREFILL = new URLSearchParams(location.search).get("bin") === "all";

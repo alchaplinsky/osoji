@@ -1,0 +1,417 @@
+version = 1
+
+# Protected: never moved to the Trash.
+
+[[rule]]
+id = "system"
+kind = "protected"
+reason = "Part of macOS. The system cannot run without it."
+match = { path = "/System" }
+
+[[rule]]
+id = "library"
+kind = "protected"
+reason = "Shared settings and support files for every user and app."
+match = { path = "/Library" }
+
+[[rule]]
+id = "usr"
+kind = "protected"
+reason = "Part of macOS. Command-line tools and libraries live here."
+match = { path = "/usr" }
+
+[[rule]]
+id = "bin"
+kind = "protected"
+reason = "Part of macOS. Core command-line tools live here."
+match = { path = "/bin" }
+
+[[rule]]
+id = "sbin"
+kind = "protected"
+reason = "Part of macOS. System administration tools live here."
+match = { path = "/sbin" }
+
+[[rule]]
+id = "private"
+kind = "protected"
+reason = "Part of macOS. System settings, logs and temporary files live here."
+match = { path = "/private" }
+
+[[rule]]
+id = "etc"
+kind = "protected"
+reason = "Part of macOS. System configuration lives here."
+match = { path = "/etc" }
+
+[[rule]]
+id = "var"
+kind = "protected"
+reason = "Part of macOS. System logs and databases live here."
+match = { path = "/var" }
+
+[[rule]]
+id = "tmp"
+kind = "protected"
+reason = "Part of macOS. Apps use it for files they are working on right now."
+match = { path = "/tmp" }
+
+[[rule]]
+id = "dev"
+kind = "protected"
+reason = "Part of macOS. Devices appear here; it holds no real files."
+match = { path = "/dev" }
+
+[[rule]]
+id = "cores"
+kind = "protected"
+reason = "Part of macOS. Crash dumps are written here."
+match = { path = "/cores" }
+
+[[rule]]
+id = "opt"
+kind = "protected"
+reason = "Installed software such as Homebrew lives here."
+match = { path = "/opt" }
+
+[[rule]]
+id = "home-root"
+kind = "protected"
+reason = "Part of macOS. Network home folders are mounted here."
+match = { path = "/home" }
+
+[[rule]]
+id = "volumes"
+kind = "protected"
+reason = "Every connected disk appears here."
+match = { path = "/Volumes" }
+
+[[rule]]
+id = "users"
+kind = "protected"
+reason = "Every user's home folder lives here."
+match = { path = "/Users" }
+
+[[rule]]
+id = "applications"
+kind = "protected"
+reason = "All your installed apps. Remove single apps instead."
+match = { path = "/Applications" }
+
+[[rule]]
+id = "utilities"
+kind = "protected"
+reason = "Apps that ship with macOS, such as Terminal and Disk Utility."
+match = { path = "/Applications/Utilities" }
+
+[[rule]]
+id = "swap"
+kind = "protected"
+reason = "Swap files. macOS manages these itself."
+match = { path = "/private/var/vm" }
+
+[[rule]]
+id = "icloud-drive"
+kind = "protected"
+reason = "Your iCloud Drive. Removing it deletes the files on every device signed in to iCloud."
+match = { path = "~/Library/Mobile Documents" }
+
+[[rule]]
+id = "cloud-storage"
+kind = "protected"
+reason = "Dropbox, Google Drive, OneDrive and similar. Removing it deletes the files in those services too."
+match = { path = "~/Library/CloudStorage" }
+
+[[rule]]
+id = "home"
+kind = "protected"
+reason = "Your home folder. Everything you own lives here."
+match = { path = "~" }
+
+[[rule]]
+id = "user-library"
+kind = "protected"
+reason = "Settings and data for all your apps."
+match = { path = "~/Library" }
+
+[[rule]]
+id = "keychains"
+kind = "protected"
+reason = "Your passwords and certificates."
+match = { path = "~/Library/Keychains" }
+
+[[rule]]
+id = "preferences"
+kind = "protected"
+reason = "Settings for all your apps."
+match = { path = "~/Library/Preferences" }
+
+[[rule]]
+id = "mail"
+kind = "protected"
+reason = "Your email, stored by Mail."
+match = { path = "~/Library/Mail" }
+
+[[rule]]
+id = "messages"
+kind = "protected"
+reason = "Your message history."
+match = { path = "~/Library/Messages" }
+
+[[rule]]
+id = "containers"
+kind = "protected"
+reason = "Data for sandboxed apps. Apps lose their documents and settings without it."
+match = { path = "~/Library/Containers" }
+
+[[rule]]
+id = "group-containers"
+kind = "protected"
+reason = "Data shared between apps. Apps lose their documents and settings without it."
+match = { path = "~/Library/Group Containers" }
+
+[[rule]]
+id = "application-support"
+kind = "protected"
+reason = "Data for all your apps. Remove single apps' folders inside it instead."
+match = { path = "~/Library/Application Support" }
+
+[[rule]]
+id = "trash"
+kind = "trash"
+reason = "Already in the Trash. Empty the Trash from Finder to reclaim the space."
+match = { parent = "~", name = ".Trash", dir = true }
+
+# Risky: allowed, but the review asks twice.
+
+[[rule]]
+id = "desktop"
+kind = "risky"
+reason = "Your personal files. Remove items inside it instead of the whole folder."
+match = { path = "~/Desktop" }
+
+[[rule]]
+id = "documents"
+kind = "risky"
+reason = "Your personal files. Remove items inside it instead of the whole folder."
+match = { path = "~/Documents" }
+
+[[rule]]
+id = "downloads"
+kind = "risky"
+reason = "Your personal files. Remove items inside it instead of the whole folder."
+match = { path = "~/Downloads" }
+
+[[rule]]
+id = "pictures"
+kind = "risky"
+reason = "Your personal files. Remove items inside it instead of the whole folder."
+match = { path = "~/Pictures" }
+
+[[rule]]
+id = "movies"
+kind = "risky"
+reason = "Your personal files. Remove items inside it instead of the whole folder."
+match = { path = "~/Movies" }
+
+[[rule]]
+id = "music"
+kind = "risky"
+reason = "Your personal files. Remove items inside it instead of the whole folder."
+match = { path = "~/Music" }
+
+[[rule]]
+id = "public"
+kind = "risky"
+reason = "Your personal files. Remove items inside it instead of the whole folder."
+match = { path = "~/Public" }
+
+[[rule]]
+id = "shared-users"
+kind = "risky"
+reason = "Files shared between every account on this Mac."
+match = { path = "/Users/Shared" }
+
+[[rule]]
+id = "photos-library"
+kind = "risky"
+reason = "Your photo library."
+match = { suffix = ".photoslibrary", dir = true }
+
+[[rule]]
+id = "installed-app"
+kind = "risky"
+reason = "An installed application."
+match = { under = "/Applications", suffix = ".app", dir = true }
+
+[[rule]]
+id = "app-data"
+kind = "risky"
+reason = "App data. The app may lose its settings or documents."
+match = { parent = "~/Library/Application Support" }
+
+[[rule]]
+id = "parallels-vm"
+kind = "risky"
+reason = "A virtual machine."
+match = { suffix = ".pvm" }
+
+[[rule]]
+id = "vmware-vm"
+kind = "risky"
+reason = "A virtual machine."
+match = { suffix = ".vmwarevm" }
+
+[[rule]]
+id = "utm-vm"
+kind = "risky"
+reason = "A virtual machine."
+match = { suffix = ".utm" }
+
+# Cleanup: what Suggestions offers. The first matching rule wins, and a match stands for everything
+# inside it. `{age}` and `{size}` in a reason are filled in per item.
+
+[[rule]]
+id = "keep-photos"
+kind = "cleanup"
+safety = "keep"
+reason = "Your photos. Unshift never suggests removing these."
+match = { suffix = ".photoslibrary", dir = true }
+
+[[rule]]
+id = "app-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "App cache. Rebuilt automatically the next time the app runs."
+match = { parent = "~/Library/Caches" }
+
+[[rule]]
+id = "simulator-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "App cache. Rebuilt automatically the next time the app runs."
+match = { parent = "~/Library/Developer/CoreSimulator/Caches" }
+
+[[rule]]
+id = "node-modules"
+kind = "cleanup"
+safety = "safe"
+reason = "Installed packages. Reinstalled by npm, pnpm or bun the next time you run install."
+match = { name = "node_modules", dir = true }
+
+[[rule]]
+id = "cargo-target"
+kind = "cleanup"
+safety = "safe"
+reason = "Rust build output. Rebuilt by cargo."
+match = { name = "target", dir = true, sibling = "Cargo.toml" }
+
+[[rule]]
+id = "xcode-derived-data"
+kind = "cleanup"
+safety = "safe"
+reason = "Build leftovers. Xcode recreates them the next time you open a project."
+match = { under = "~/Library/Developer/Xcode", name = "DerivedData", dir = true }
+
+[[rule]]
+id = "xcode-device-support"
+kind = "cleanup"
+safety = "safe"
+reason = "Debug files for devices you may no longer connect. Xcode re-downloads them if needed."
+match = { under = "~/Library/Developer/Xcode", name = "iOS DeviceSupport", dir = true }
+
+[[rule]]
+id = "gradle-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "Package manager cache. Downloaded again when needed."
+match = { under = "~", name = ".gradle", dir = true }
+
+[[rule]]
+id = "user-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "Package manager cache. Downloaded again when needed."
+match = { path = "~/.cache", dir = true }
+
+[[rule]]
+id = "npm-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "Package manager cache. Downloaded again when needed."
+match = { path = "~/.npm/_cacache", dir = true }
+
+[[rule]]
+id = "cargo-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "Package manager cache. Downloaded again when needed."
+match = { path = "~/.cargo/registry/cache", dir = true }
+
+[[rule]]
+id = "bun-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "Package manager cache. Downloaded again when needed."
+match = { path = "~/.bun/install/cache", dir = true }
+
+[[rule]]
+id = "parallels-vm-cleanup"
+kind = "cleanup"
+safety = "review"
+reason = "A virtual machine. Remove only if you no longer need it."
+match = { suffix = ".pvm", dir = true }
+
+[[rule]]
+id = "vmware-vm-cleanup"
+kind = "cleanup"
+safety = "review"
+reason = "A virtual machine. Remove only if you no longer need it."
+match = { suffix = ".vmwarevm", dir = true }
+
+[[rule]]
+id = "docker-disk"
+kind = "cleanup"
+safety = "review"
+reason = "Docker's disk image. Prune images and containers from Docker instead of removing it."
+match = { name = "Docker.raw" }
+
+[[rule]]
+id = "old-download"
+kind = "cleanup"
+safety = "review"
+reason = "In Downloads for {age}, and probably already used."
+match = { parent = "~/Downloads", older_than_days = 90 }
+
+[[rule]]
+id = "large-old-file"
+kind = "cleanup"
+safety = "review"
+reason = "Large file not modified in {age}."
+match = { dir = false, min_bytes = 524288000, older_than_days = 180 }
+
+# Unexpected: nothing to remove, just worth a look. A stronger rule on the same node wins.
+
+[[rule]]
+id = "unknown-top-level"
+kind = "unexpected"
+reason = "Not a standard macOS top-level folder. Worth checking what put it there."
+match = { parent = "/", dir = true, not_named = [
+  "Applications", "Library", "System", "Users", "Volumes", "bin", "cores", "dev", "etc", "home", "opt",
+  "private", "sbin", "tmp", "usr", "var", ".vol", ".file", ".VolumeIcon.icns", ".fseventsd",
+  ".Spotlight-V100", ".DocumentRevisions-V100", ".PKInstallSandboxManager",
+  ".PKInstallSandboxManager-SystemSoftware", ".TemporaryItems", ".Trashes", ".hotfiles.btree",
+  ".nofollow", ".resolve",
+] }
+
+[[rule]]
+id = "large-hidden-home-folder"
+kind = "unexpected"
+reason = "A hidden folder in your home that has grown large."
+match = { parent = "~", prefix = ".", dir = true, min_bytes = 5368709120, not_named = [".Trash"] }
+
+[[rule]]
+id = "other-user-home"
+kind = "unexpected"
+reason = "Another user account's home folder, or a leftover from one."
+match = { parent = "/Users", dir = true, not_named = ["Shared", "Guest"], not_path = ["~"] }

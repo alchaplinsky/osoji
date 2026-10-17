@@ -126,7 +126,9 @@ names: utf8 blob
 - Compare mode colors the diff by growth and shrink.
 
 ## Cleanup rules
-- Developer caches: node_modules, target/, DerivedData, .gradle, ~/Library/Caches, Docker.raw, and package-manager caches.
+- The rules live in `src-tauri/crates/scan-policy/policy/macos.toml` as `kind = "cleanup"` rules, each with a `safety` (safe, review or keep) and a `reason`. `{age}` and `{size}` in a reason are filled in per item. A match stands for everything inside it, and nothing inside a package bundle (.app, .photoslibrary, .framework, ...) is suggested. A protected item always comes out as keep.
+- `kind = "unexpected"` rules in the same file flag things that are usually not there (an unknown top-level folder, a large hidden folder in home, another user's home). Suggestions lists them under "Worth knowing" with nothing to remove.
+- Developer caches: node_modules, target/, DerivedData, .gradle, each app's folder in ~/Library/Caches, Docker.raw, and package-manager caches.
 - Files over 500 MB not modified in 180 days.
 - Downloads older than 90 days.
 - Duplicates, on demand: group by size, then a 4 KB blake3 prefix hash, then a full blake3 hash.

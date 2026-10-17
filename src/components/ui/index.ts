@@ -14,6 +14,7 @@ export { Card, Panel, StatTile } from "./Surface";
 export { default as Menu } from "./Menu";
 export type { MenuItemDef } from "./Menu";
 export { default as Toast } from "./Toast";
+export { default as Banner } from "./Banner";
 export { default as Sheet } from "./Sheet";
 export { default as Icon } from "./Icon";
 export type { IconName } from "./Icon";

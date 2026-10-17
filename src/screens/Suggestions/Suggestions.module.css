@@ -66,6 +66,7 @@
 .safe { background: var(--safe); }
 .review { background: var(--review); }
 .keep { background: var(--keep); }
+.unexpected { background: var(--fg3); }
 
 .groupTitle {
   font-size: 14px;
@@ -105,6 +106,13 @@
   flex: 1;
   min-width: 0;
 }
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.title .name { min-width: 0; }
 
 .name,
 .path {
