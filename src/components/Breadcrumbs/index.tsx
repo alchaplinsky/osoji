@@ -27,6 +27,7 @@ export default function Breadcrumbs({ ancestors, current, onNavigate }: Breadcru
     setMenuX(null);
   }, [size.w, chain.length, current.id]);
   // …then hide one more middle crumb per pass until it fits. Layout effects run before paint, so no flicker.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- measures after every render on purpose; `hidden` caps the chain
   useLayoutEffect(() => {
     const el = chainRef.current;
     if (el && el.scrollWidth > el.clientWidth && hidden < maxHidden) setHidden(hidden + 1);

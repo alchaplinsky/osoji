@@ -23,7 +23,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# In-app W3C WebDriver server for the e2e suite (tests/e2e): `cargo build --features webdriver`.
+# Off by default so release bundles never carry it.
+webdriver = ["dep:tauri-plugin-webdriver"]
+
 [dependencies]
+tauri-plugin-webdriver = { version = "0.2", optional = true }
 scan-core = { path = "crates/scan-core" }
 scan-macos = { path = "crates/scan-macos" }
 scan-policy = { path = "crates/scan-policy" }

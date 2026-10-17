@@ -55,12 +55,7 @@ pub fn install(ns_window: *mut c_void) {
 
 type ShouldZoom = extern "C-unwind" fn(&AnyObject, Sel, &NSWindow, NSRect) -> Bool;
 
-extern "C-unwind" fn should_zoom(
-    _this: &AnyObject,
-    _cmd: Sel,
-    window: &NSWindow,
-    proposed: NSRect,
-) -> Bool {
+extern "C-unwind" fn should_zoom(_this: &AnyObject, _cmd: Sel, window: &NSWindow, proposed: NSRect) -> Bool {
     let key = window as *const NSWindow as usize;
 
     // Since macOS 15, dragging a zoomed window by its title bar un-zooms it

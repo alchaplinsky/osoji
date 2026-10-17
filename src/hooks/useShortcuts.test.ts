@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { comboOf } from "./useShortcuts";
 
 const key = (k: string, mods: Partial<KeyboardEvent> = {}) =>

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { relatedKeys } from "../Sunburst/layout";
 import type { ViewNode } from "../../lib/api";
 import { neutral, tone } from "../../design/palette";

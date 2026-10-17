@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -17,5 +18,9 @@ export default defineConfig({
     target: process.env.TAURI_ENV_PLATFORM == "windows" ? "chrome105" : "safari13",
     minify: !process.env.TAURI_ENV_DEBUG ? "esbuild" : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+  },
+  // Unit tests live next to the code; tests/e2e is WebdriverIO's and must not be collected here.
+  test: {
+    include: ["src/**/*.test.ts"],
   },
 });

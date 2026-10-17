@@ -283,8 +283,7 @@ async fn start_scan(
 
     let task = {
         let (cfg, progress, cancel) = (cfg.clone(), progress.clone(), cancel.clone());
-        tauri::async_runtime::spawn_blocking(move || scan_macos::walk(&cfg, &progress, &cancel))
-            .await
+        tauri::async_runtime::spawn_blocking(move || scan_macos::walk(&cfg, &progress, &cancel)).await
     };
     done.store(true, Ordering::Release);
     let _ = poller.join();
@@ -322,9 +321,7 @@ fn home_path() -> PathBuf {
 }
 
 fn unix_now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
 }
 
 #[tauri::command]
@@ -565,12 +562,7 @@ fn reveal(state: State<'_, AppState>, node: NodeId) -> Result<(), String> {
         }
         scan.arena.path(node)
     };
-    std::process::Command::new("open")
-        .arg("-R")
-        .arg(&path)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    std::process::Command::new("open").arg("-R").arg(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 fn has_ancestor(a: &Arena, id: NodeId, ancestor: NodeId) -> bool {
@@ -630,7 +622,11 @@ fn plan_sweep(policy: &Policy, scan: &Scan, nodes: Vec<NodeId>) -> Result<(Vec<S
 
 /// Fold the delete outcomes into the tree. `live` is None when another scan replaced the arena
 /// meanwhile: the items are still reported as moved, but nothing is marked.
-fn finish_sweep(mut live: Option<&mut Scan>, outcomes: Vec<(NodeId, u64, Result<(), String>)>, mut failed: Vec<String>) -> TrashResult {
+fn finish_sweep(
+    mut live: Option<&mut Scan>,
+    outcomes: Vec<(NodeId, u64, Result<(), String>)>,
+    mut failed: Vec<String>,
+) -> TrashResult {
     let mut bytes = 0u64;
     let mut trashed = Vec::new();
     for (id, size, outcome) in outcomes {
@@ -671,7 +667,11 @@ async fn trash_nodes(
 
 /// Moves nodes to the Trash without holding the scan lock during the slow part:
 /// validate under the lock, delete off the main thread, then re-lock to mark.
-async fn sweep(state: &AppState, nodes: Vec<NodeId>, on_progress: Channel<TrashProgress>) -> Result<TrashResult, String> {
+async fn sweep(
+    state: &AppState,
+    nodes: Vec<NodeId>,
+    on_progress: Channel<TrashProgress>,
+) -> Result<TrashResult, String> {
     let (generation, items, refused) = {
         let guard = state.scan.lock().unwrap();
         let scan = guard.as_ref().ok_or("no scan loaded")?;
@@ -734,11 +734,7 @@ fn trash_info(state: State<'_, AppState>) -> Option<TrashInfo> {
 
 #[tauri::command]
 fn show_trash() -> Result<(), String> {
-    std::process::Command::new("open")
-        .arg(home_path().join(".Trash"))
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    std::process::Command::new("open").arg(home_path().join(".Trash")).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -794,12 +790,7 @@ fn volumes() -> Result<Vec<VolumeInfo>, String> {
 fn volume_from(st: &libc::statfs) -> VolumeInfo {
     let mount = unsafe { CStr::from_ptr(st.f_mntonname.as_ptr()) }.to_string_lossy().into_owned();
     let bsize = u64::from(st.f_bsize);
-    VolumeInfo {
-        name: volume_name(&mount),
-        total: st.f_blocks * bsize,
-        free: st.f_bavail * bsize,
-        mount,
-    }
+    VolumeInfo { name: volume_name(&mount), total: st.f_blocks * bsize, free: st.f_bavail * bsize, mount }
 }
 
 /// `/Volumes` holds the user-visible names; the boot volume is a symlink to `/`.
@@ -839,21 +830,21 @@ fn full_disk_access() -> bool {
 
 #[tauri::command]
 fn open_privacy_settings() -> Result<(), String> {
-    std::process::Command::new("open")
-        .arg(PRIVACY_ALL_FILES_URL)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    std::process::Command::new("open").arg(PRIVACY_ALL_FILES_URL).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 pub fn run() {
     scan_macos::disable_dataless_materialization();
     scan_macos::raise_fd_limit();
     let policy = Policy::for_current_os().unwrap_or_else(|e| panic!("bundled {e}"));
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_process::init());
+    // WebDriver server on 127.0.0.1:4445 for tests/e2e; only in builds with `--features webdriver`.
+    #[cfg(feature = "webdriver")]
+    let builder = builder.plugin(tauri_plugin_webdriver::init());
+    builder
         .manage(AppState { policy, ..AppState::default() })
         .setup(|app| {
             // Double-click on a drag region zooms the window; route that zoom through the
@@ -902,7 +893,11 @@ mod tests {
         let file = arena.push(folder, b"file.bin", 10, 0, Flags::empty());
         arena.aggregate();
         let index = ChildIndex::build(&arena);
-        (Scan { root: PathBuf::from("/tmp/root"), arena, index, hits: PolicyHits::default(), swept: (0, 0) }, folder, file)
+        (
+            Scan { root: PathBuf::from("/tmp/root"), arena, index, hits: PolicyHits::default(), swept: (0, 0) },
+            folder,
+            file,
+        )
     }
 
     #[test]
@@ -949,7 +944,11 @@ mod tests {
         let policy = Policy::from_toml(TRASH_POLICY).unwrap();
         let ctx = PolicyContext { home: PathBuf::new(), now: 0 };
         let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
-        (policy, Scan { root: PathBuf::from("/tmp/root"), arena, index, hits, swept: (0, 0) }, [trash, docs, old, report])
+        (
+            policy,
+            Scan { root: PathBuf::from("/tmp/root"), arena, index, hits, swept: (0, 0) },
+            [trash, docs, old, report],
+        )
     }
 
     #[test]
@@ -960,7 +959,10 @@ mod tests {
         assert!(gone_or_in_trash(&scan.arena, old));
         assert!(!gone_or_in_trash(&scan.arena, docs));
         assert!(!gone_or_in_trash(&scan.arena, report));
-        assert_eq!(guard_of(&policy, &scan, trash), Some(Guard { kind: "trash", reason: "Already in the Trash.".into() }));
+        assert_eq!(
+            guard_of(&policy, &scan, trash),
+            Some(Guard { kind: "trash", reason: "Already in the Trash.".into() })
+        );
 
         let (items, refused) = plan_sweep(&policy, &scan, vec![trash, old, report]).unwrap();
         assert_eq!(items.iter().map(|item| item.0).collect::<Vec<_>>(), vec![report]);
@@ -1208,7 +1210,8 @@ mod tests {
         let found = suggest(&base, a, Path::new("/nonexistent-home"), 0);
         std::fs::remove_dir_all(&base).unwrap();
 
-        let modules: Vec<&str> = found.iter().filter(|s| s.entry.name == "node_modules").map(|s| s.entry.path.as_str()).collect();
+        let modules: Vec<&str> =
+            found.iter().filter(|s| s.entry.name == "node_modules").map(|s| s.entry.path.as_str()).collect();
         assert_eq!(modules, [base.join("app/node_modules").to_str().unwrap()]);
         assert_eq!(found[0].safety, "safe");
     }

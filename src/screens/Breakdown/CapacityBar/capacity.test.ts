@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import type { ViewNode } from "../../../lib/api";
 import type { Volume } from "../../../lib/types";
 import { hiddenBytes, hiddenNote } from "./capacity";
@@ -36,6 +36,6 @@ describe("hiddenNote", () => {
   test("mentions unreadable folders only when there are some", () => {
     expect(hiddenNote()).not.toContain("could not be read.");
     expect(hiddenNote(0)).not.toContain("could not be read.");
-    expect(hiddenNote(871)).toEndWith(" 871 folders could not be read.");
+    expect(hiddenNote(871)).toMatch(/ 871 folders could not be read\.$/);
   });
 });

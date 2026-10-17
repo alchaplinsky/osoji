@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run test
+
+  # scan-core and scan-policy are plain Rust with no platform calls, so they are checked here.
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Rust format
+        run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
+      - name: Clippy
+        run: cargo clippy -p scan-core -p scan-policy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
+      - name: Rust tests
+        run: cargo test -p scan-core -p scan-policy --manifest-path src-tauri/Cargo.toml
+
+  # The scanner (scan-macos) is built on getattrlistbulk and the app crate links it directly, so
+  # neither compiles on Linux. Only what needs the real app runs here: those crates' tests, their
+  # clippy pass, the debug build, and the e2e suite that drives it.
+  app:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: bun install --frozen-lockfile
+      - name: Clippy
+        run: cargo clippy -p unshift-app -p scan-macos --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
+      - name: Rust tests
+        run: cargo test -p unshift-app -p scan-macos --manifest-path src-tauri/Cargo.toml
+      - name: Build debug app
+        run: cargo build --features webdriver --manifest-path src-tauri/Cargo.toml
+      - name: E2E tests
+        run: bun run test:e2e
