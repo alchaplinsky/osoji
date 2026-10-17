@@ -77,6 +77,7 @@
 
 :root, [data-layout="cards"] {
   --pad: 10px;
+  --side-w: 232px;
   --side-pad: 14px 10px 10px;
   --side-r: 14px;
   --side-bd: var(--line);
