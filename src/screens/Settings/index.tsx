@@ -1,6 +1,7 @@
 import Toolbar, { ToolbarTitle } from "../../components/Toolbar";
 import { Eyebrow, SegmentedControl } from "../../components/ui";
 import { LAYOUT_NAMES, LAYOUTS, THEME_NAMES, THEMES } from "../../design/theme";
+import { useAppVersion } from "../../hooks/useAppVersion";
 import { useSettings } from "../../hooks/useSettings";
 import { useTheme } from "../../hooks/useTheme";
 import ExtensionCard from "./ExtensionCard";
@@ -18,6 +19,7 @@ const SOON_EXTENSIONS = [
 export default function SettingsScreen() {
   const { theme, layout, setTheme, setLayout } = useTheme();
   const { confirmBig, setConfirmBig, watchers, setWatchers } = useSettings();
+  const version = useAppVersion();
 
   return (
     <section className={styles.screen}>
@@ -66,7 +68,7 @@ export default function SettingsScreen() {
             ))}
           </div>
         </div>
-        <div className={styles.footer}>Unshift 0.1.0 · Up to date</div>
+        <div className={styles.footer}>Unshift {version}</div>
       </div>
     </section>
   );
