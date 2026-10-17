@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { applyTheme, isLayout, isTheme, type LayoutName, type ThemeName } from "../design/theme";
 import { chartVars } from "../design/palette";
 
+// Also read by the inline bootstrap script in index.html, which applies the saved
+// theme before CSS loads. Keep the key and the fallback logic in `initial` in sync.
 const STORAGE_KEY = "unshift.appearance";
 
 type Appearance = { theme: ThemeName; layout: LayoutName };

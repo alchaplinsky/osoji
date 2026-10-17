@@ -2,8 +2,11 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { cx } from "../cx";
 import styles from "./Menu.module.css";
 
-/** `icon` is any 16px glyph, typically a lucide-react icon rendered with `size={16}`. */
-export type MenuItemDef = { label: ReactNode; icon?: ReactNode; hint?: string; onSelect: () => void };
+/**
+ * `icon` is any 16px glyph, typically a lucide-react icon rendered with `size={16}`.
+ * `checked` turns the item into a radio choice and highlights it when true.
+ */
+export type MenuItemDef = { label: ReactNode; icon?: ReactNode; hint?: string; checked?: boolean; onSelect: () => void };
 
 type Props = {
   open: boolean;
@@ -39,8 +42,9 @@ export default function Menu({ open, onClose, items, className }: Props) {
         <button
           key={i}
           type="button"
-          role="menuitem"
-          className={styles.item}
+          role={it.checked === undefined ? "menuitem" : "menuitemradio"}
+          aria-checked={it.checked}
+          className={cx(styles.item, it.checked && styles.checked)}
           onClick={() => {
             onClose();
             it.onSelect();
@@ -48,7 +52,7 @@ export default function Menu({ open, onClose, items, className }: Props) {
         >
           <span className={styles.label}>
             {it.icon && <span className={styles.icon}>{it.icon}</span>}
-            {it.label}
+            <span className={styles.text}>{it.label}</span>
           </span>
           {it.hint && <span className={styles.hint}>{it.hint}</span>}
         </button>
