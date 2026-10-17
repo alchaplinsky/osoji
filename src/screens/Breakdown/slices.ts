@@ -1,6 +1,7 @@
 import type { ThemeName } from "../../design/theme";
 import { neutral, tone } from "../../design/palette";
 import type { ViewNode } from "../../lib/api";
+import { isTrash } from "../../lib/bin";
 import type { Guard, HoverId } from "../../lib/types";
 import { otherKey, type SliceKey } from "../../components/Sunburst/layout";
 
@@ -16,8 +17,25 @@ export type Slice = {
   error: boolean;
 };
 
+/** A node's chart label: the Trash folder reads as "Trash" rather than ".Trash". */
+export const nodeName = (n: ViewNode) => (isTrash(n) ? "Trash" : n.name);
+
+/** A node's chart colour: sibling `i`'s ramp stop, or neutral for the Trash, which is not the user's to sort. */
+export const nodeFill = (n: ViewNode, theme: ThemeName, i: number, depth = 1) => (isTrash(n) ? neutral(theme) : tone(theme, i, depth));
+
+const sliceOf = (n: ViewNode, theme: ThemeName, i: number): Slice => ({
+  node: n,
+  key: n.id,
+  hover: n.id,
+  name: nodeName(n),
+  size: n.size,
+  fill: nodeFill(n, theme, i),
+  guard: n.guard ?? null,
+  error: n.error,
+});
+
 export function slicesOf(view: ViewNode, theme: ThemeName): Slice[] {
-  const slices: Slice[] = view.children.map((n, i) => ({ node: n, key: n.id, hover: n.id, name: n.name, size: n.size, fill: tone(theme, i), guard: n.guard ?? null, error: n.error }));
+  const slices: Slice[] = view.children.map((n, i) => sliceOf(n, theme, i));
   if (view.other > 0) {
     slices.push({ node: null, key: otherKey(view.id), hover: "other", name: `${view.other_count} smaller items`, size: view.other, fill: neutral(theme), guard: null, error: false });
   }
@@ -34,7 +52,7 @@ export function visibleSlices(view: ViewNode, theme: ThemeName, max = 14, minSha
   let restCount = view.other_count;
   view.children.forEach((n, i) => {
     if (i < max && view.size > 0 && n.size / view.size >= minShare) {
-      slices.push({ node: n, key: n.id, hover: n.id, name: n.name, size: n.size, fill: tone(theme, i), guard: n.guard ?? null, error: n.error });
+      slices.push(sliceOf(n, theme, i));
     } else {
       restSize += n.size;
       restCount += 1;
