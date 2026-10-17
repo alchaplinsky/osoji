@@ -28,6 +28,7 @@
   padding: var(--viz-pad);
 }
 
+/* Bottom padding clears the bin bar (56px tall, 24px off the bottom) plus a little breathing room. */
 .stage {
   flex: 1;
   min-height: 0;
@@ -35,8 +36,17 @@
   /* `safe` keeps a chart taller than the stage anchored below the top strip instead of spilling over it. */
   align-items: safe center;
   justify-content: center;
-  /* Leaves the strip above the chart clear for the hover label and the chart switcher. */
-  padding: calc(var(--switcher-h) + 10px) 0 72px;
+  /* Top padding leaves the strip above the chart clear for the hover label and the chart switcher. */
+  padding: calc(var(--switcher-h) + 10px) 0 96px;
+  container-type: size;
+}
+
+/* Radial charts take most of the stage but stop growing on large windows. */
+.radial {
+  flex: none;
+  align-self: center;
+  width: min(88cqmin, 720px);
+  height: min(88cqmin, 720px);
 }
 
 /* Hover label and chart switcher share the strip above the stage: label on the left, switcher on the right. */
