@@ -46,7 +46,7 @@
 
 .row {
   display: grid;
-  grid-template-columns: 16px 10px minmax(0, 1fr) auto;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 8px;
@@ -63,11 +63,37 @@
   outline-offset: -2px;
 }
 
+/* One slot holds the colour swatch and the checkbox: the swatch by default, the checkbox while the pointer
+   is over the row, while it has keyboard focus, or once the item is ticked. */
+.mark {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+}
+
 .swatch {
   width: 10px;
   height: 10px;
   border-radius: 3px;
+  transition: opacity .15s;
 }
+
+.check {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity .15s, background .2s, border-color .2s;
+}
+
+.row:hover .check,
+.check:focus-visible,
+.check[aria-checked="true"] { opacity: 1; }
+
+.row:hover .mark:has(.check) .swatch,
+.mark:has(.check:focus-visible) .swatch,
+.mark:has(.check[aria-checked="true"]) .swatch { opacity: 0; }
 
 .body { min-width: 0; }
 
