@@ -17,6 +17,9 @@
 }
 
 .viz {
+  /* Footprint of the chart switcher in the top-right corner; four 26px icons plus gaps, padding and border. */
+  --switcher-w: 118px;
+  --switcher-h: 34px;
   flex: 1;
   min-width: 0;
   position: relative;
@@ -30,9 +33,11 @@
   flex: 1;
   min-height: 0;
   display: flex;
-  align-items: center;
+  /* `safe` keeps a chart taller than the stage anchored below the top strip instead of spilling over it. */
+  align-items: safe center;
   justify-content: center;
-  padding: 18px 0 96px;
+  /* Top padding leaves the strip above the chart clear for the hover label and the chart switcher. */
+  padding: calc(var(--switcher-h) + 10px) 0 96px;
   container-type: size;
 }
 
@@ -44,6 +49,7 @@
   height: min(88cqmin, 720px);
 }
 
+/* Hover label and chart switcher share the strip above the stage: label on the left, switcher on the right. */
 .hoverLabel {
   position: absolute;
   top: var(--viz-pad);
@@ -52,8 +58,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: calc(100% - 8px);
+  max-width: calc(100% - var(--viz-pad) * 2 - var(--switcher-w) - 16px);
+  min-height: var(--switcher-h);
   pointer-events: none;
+}
+
+.vizSwitcher {
+  position: absolute;
+  top: var(--viz-pad);
+  right: var(--viz-pad);
+  z-index: 2;
 }
 
 .hoverSwatch {

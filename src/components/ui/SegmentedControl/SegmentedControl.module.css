@@ -23,5 +23,15 @@
   transition: background .25s, color .25s;
 }
 .opt:disabled { opacity: .4; cursor: default; }
+.opt:hover:not(:disabled) { color: var(--fg); }
 .md .opt { height: 28px; padding: 0 14px; }
 .active { background: var(--acsoft); color: var(--fg); }
+
+.iconOpt {
+  width: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.md .iconOpt { width: 28px; padding: 0; }
