@@ -1,10 +1,10 @@
-import { beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { DownloadEvent } from "@tauri-apps/plugin-updater";
 import type { UpdateProgress } from "./autoUpdate";
 
-const check = mock();
-mock.module("@tauri-apps/plugin-updater", () => ({ check: () => check() }));
-mock.module("@tauri-apps/plugin-process", () => ({ relaunch: mock() }));
+const check = vi.fn();
+vi.mock("@tauri-apps/plugin-updater", () => ({ check: () => check() }));
+vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: vi.fn() }));
 
 const { checkForUpdate } = await import("./autoUpdate");
 
@@ -23,8 +23,8 @@ function updateEmitting(events: DownloadEvent[]) {
 describe("checkForUpdate", () => {
   beforeEach(() => {
     check.mockReset();
-    spyOn(console, "info").mockImplementation(() => {});
-    spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
   test("reports the download from found through installing", async () => {
@@ -50,7 +50,7 @@ describe("checkForUpdate", () => {
 
   test("reports nothing when already up to date", async () => {
     check.mockResolvedValue(null);
-    const onProgress = mock();
+    const onProgress = vi.fn();
 
     expect(await checkForUpdate(onProgress)).toEqual({ kind: "uptodate" });
     expect(onProgress).not.toHaveBeenCalled();

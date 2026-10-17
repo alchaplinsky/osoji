@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "bun test",
+    "lint": "eslint src tests && tsc --noEmit && tsc --noEmit -p tests/e2e",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "wdio run tests/e2e/wdio.conf.ts",
+    "test:e2e:build": "cargo build --features webdriver --manifest-path src-tauri/Cargo.toml && bun run test:e2e",
     "preview": "vite preview",
     "tauri": "tauri"
   },
@@ -22,12 +26,26 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2.5.0",
-    "@types/bun": "^1.4.3",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^26.6.5",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "@wdio/cli": "9",
+    "@wdio/globals": "9",
+    "@wdio/local-runner": "9",
+    "@wdio/mocha-framework": "9",
+    "@wdio/spec-reporter": "9",
+    "@wdio/types": "9",
+    "eslint": "^10.13.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
     "typescript": "^5.6.3",
-    "vite": "^5.4.11"
+    "typescript-eslint": "^8.71.2",
+    "vite": "^5.4.11",
+    "vitest": "3",
+    "webdriverio": "9"
   }
 }

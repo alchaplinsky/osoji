@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { reviewWarning, toBinItem, withItem } from "./bin";
 import type { BinItem, Guard } from "./types";
 
