@@ -855,14 +855,45 @@ fn volume_info(path: String) -> Result<VolumeInfo, String> {
     if unsafe { libc::statfs(c.as_ptr(), &mut st) } != 0 {
         return Err(std::io::Error::last_os_error().to_string());
     }
+    Ok(volume_from(&st))
+}
+
+/// User-visible local volumes: the boot disk at `/` plus whatever is mounted under
+/// `/Volumes`. That prefix already leaves out `/dev` and the read-only system volumes
+/// under `/System/Volumes`, including the boot disk's Data volume, which `/` stands for.
+#[tauri::command]
+fn volumes() -> Result<Vec<VolumeInfo>, String> {
+    let mut buf: *mut libc::statfs = std::ptr::null_mut();
+    let n = unsafe { libc::getmntinfo(&mut buf, libc::MNT_NOWAIT) };
+    if n <= 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    // getmntinfo owns the buffer and reuses it on the next call; copy out before returning.
+    let mounts = unsafe { std::slice::from_raw_parts(buf, n as usize) };
+    let mut out: Vec<VolumeInfo> = mounts
+        .iter()
+        .filter(|st| {
+            let flags = st.f_flags as libc::c_int;
+            let mount = unsafe { CStr::from_ptr(st.f_mntonname.as_ptr()) }.to_bytes();
+            flags & libc::MNT_LOCAL != 0
+                && flags & libc::MNT_DONTBROWSE == 0
+                && (mount == b"/" || mount.starts_with(b"/Volumes/"))
+        })
+        .map(volume_from)
+        .collect();
+    out.sort_by(|a, b| (a.mount != "/").cmp(&(b.mount != "/")).then_with(|| a.name.cmp(&b.name)));
+    Ok(out)
+}
+
+fn volume_from(st: &libc::statfs) -> VolumeInfo {
     let mount = unsafe { CStr::from_ptr(st.f_mntonname.as_ptr()) }.to_string_lossy().into_owned();
-    let bsize = st.f_bsize as u64;
-    Ok(VolumeInfo {
+    let bsize = u64::from(st.f_bsize);
+    VolumeInfo {
         name: volume_name(&mount),
-        total: st.f_blocks as u64 * bsize,
-        free: st.f_bavail as u64 * bsize,
+        total: st.f_blocks * bsize,
+        free: st.f_bavail * bsize,
         mount,
-    })
+    }
 }
 
 /// `/Volumes` holds the user-visible names; the boot volume is a symlink to `/`.
@@ -943,7 +974,8 @@ pub fn run() {
             home_dir,
             volume_info,
             full_disk_access,
-            open_privacy_settings
+            open_privacy_settings,
+            volumes
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -1152,5 +1184,15 @@ mod tests {
         let docker = by_name(&found, "Docker.raw").expect("Docker.raw suggested");
         assert_eq!(docker.safety, "keep");
         assert_eq!(docker.reason, "Protected by macOS and cannot be moved by Unshift.");
+    }
+
+    #[test]
+    fn lists_the_boot_volume_first() {
+        let list = volumes().unwrap();
+        let boot = &list[0];
+        assert_eq!(boot.mount, "/");
+        assert!(!boot.name.is_empty());
+        assert!(boot.total > 0);
+        assert!(list.iter().all(|v| v.mount == "/" || v.mount.starts_with("/Volumes/")));
     }
 }

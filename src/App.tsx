@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import Sidebar from "./components/Sidebar";
+import Sidebar, { type RootChoice } from "./components/Sidebar";
 import ReviewSheet from "./components/ReviewSheet";
 import FdaBanner from "./components/FdaBanner";
 import { Toast } from "./components/ui";
@@ -19,7 +19,7 @@ import { useTheme } from "./hooks/useTheme";
 import { useSettings } from "./hooks/useSettings";
 import { useFullDiskAccess } from "./hooks/useFullDiskAccess";
 import { useShortcuts } from "./hooks/useShortcuts";
-import { homeDir, nodeInfo, reveal, trashNodes, volumeInfo } from "./lib/api";
+import { homeDir, nodeInfo, reveal, trashNodes, volumeInfo, volumes as listVolumes } from "./lib/api";
 import type { TrashProgress } from "./lib/api";
 import { humanBytes } from "./lib/format";
 import { reviewWarning } from "./lib/bin";
@@ -46,6 +46,7 @@ export default function App() {
   const [home, setHome] = useState("");
   const [scanRoot, setScanRoot] = useState("/");
   const [volume, setVolume] = useState<Volume | null>(null);
+  const [volumes, setVolumes] = useState<Volume[]>([]);
   const totals = useScanTotals();
   const [finishing, setFinishing] = useState(false);
   const [hoverId, setHoverId] = useState<HoverId>(null);
@@ -59,6 +60,14 @@ export default function App() {
 
   useEffect(() => {
     homeDir().then(setHome).catch(console.error);
+  }, []);
+
+  // Drives come and go while the app is in the background; re-list them on focus.
+  useEffect(() => {
+    const refresh = () => listVolumes().then(setVolumes).catch(console.error);
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
   }, []);
 
   useEffect(() => {
@@ -113,9 +122,9 @@ export default function App() {
   );
 
   const pickRoot = useCallback(
-    async (choice: "disk" | "home" | "folder") => {
-      if (choice === "disk") return changeRoot("/");
-      if (choice === "home") return changeRoot(home || (await homeDir()));
+    async (choice: RootChoice) => {
+      if (choice.kind === "volume") return changeRoot(choice.mount);
+      if (choice.kind === "home") return changeRoot(home || (await homeDir()));
       const dir = await open({ directory: true, multiple: false, defaultPath: scanRoot });
       if (typeof dir === "string") changeRoot(dir);
     },
@@ -123,11 +132,13 @@ export default function App() {
   );
 
   const rootLabel =
-    scanRoot === "/"
-      ? (volume?.name ?? "Macintosh HD")
+    scanRoot === volume?.mount
+      ? volume.name
       : home && (scanRoot === home || scanRoot.startsWith(`${home}/`))
         ? "~" + scanRoot.slice(home.length)
-        : scanRoot;
+        : scanRoot === "/"
+          ? "Startup Disk"
+          : scanRoot;
   const scanned = scan.status === "done" && explorer.view !== null;
   const unreadable = scan.summary?.errors ?? 0;
   const askForAccess = unreadable > 0 && fda.granted === false && !fda.dismissed;
@@ -243,7 +254,9 @@ export default function App() {
     <div className={styles.app}>
       <Sidebar
         volume={volume}
+        volumes={volumes}
         scanRoot={scanRoot}
+        home={home}
         rootPickerDisabled={scan.status === "scanning" || sweeping}
         onPickRoot={pickRoot}
         scanned={scanned}
@@ -292,6 +305,7 @@ export default function App() {
             onReveal={() => reveal(explorer.currentId).catch(console.error)}
             onToggleBin={toggleBinById}
             banner={askForAccess && <FdaBanner unreadable={unreadable} onOpenSettings={fda.openSettings} onDismiss={fda.dismiss} />}
+            unreadable={unreadable}
             {...binProps}
           />
         )}

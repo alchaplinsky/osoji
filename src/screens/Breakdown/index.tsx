@@ -39,6 +39,8 @@ type BreakdownScreenProps = {
   onReview: () => void;
   /** Notice shown between the toolbar and the capacity bar. */
   banner?: ReactNode;
+  /** Folders the scan could not read; shown in the capacity bar's "Not scanned" tooltip. */
+  unreadable?: number;
 };
 
 const HINTS: Record<Viz, string> = {
@@ -74,6 +76,7 @@ export default function BreakdownScreen({
   onRemoveFromBin,
   onReview,
   banner,
+  unreadable,
 }: BreakdownScreenProps) {
   const ownIds = useMemo(() => new Set(binItems.map((item) => item.id)), [binItems]);
   const binIds = tickedIds ?? ownIds;
@@ -103,6 +106,7 @@ export default function BreakdownScreen({
         onHover={onHover}
         onOpen={onNavigate}
         pending={pending}
+        unreadable={unreadable}
       />
       <div className={cx(styles.body, listOpen ? styles.listOpen : styles.listHidden)}>
         <div className={styles.viz}>
