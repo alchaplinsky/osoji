@@ -166,31 +166,31 @@ fn finds_nodes_by_path() {
 fn matches_each_field() {
     assert_eq!(matched("path = \"~/proj\""), ["/Users/alex/proj"]);
     assert_eq!(matched("parent = \"~/proj\""), ["/Users/alex/proj/Cargo.toml", "/Users/alex/proj/target"]);
-    assert_eq!(matched("under = \"/Applications\", dir = true"), [
-        "/Applications/Safari.app",
-        "/Applications/Utilities",
-        "/Applications/Utilities/Terminal.app"
-    ]);
+    assert_eq!(
+        matched("under = \"/Applications\", dir = true"),
+        ["/Applications/Safari.app", "/Applications/Utilities", "/Applications/Utilities/Terminal.app"]
+    );
     assert_eq!(matched("name = \".Trash\""), ["/Users/alex/.Trash", "/Users/alex/Documents/.Trash"]);
-    assert_eq!(matched("suffix = \".app\""), [
-        "/Applications/Safari.app",
-        "/Applications/Utilities/Terminal.app",
-        "/Applications/readme.app"
-    ]);
+    assert_eq!(
+        matched("suffix = \".app\""),
+        ["/Applications/Safari.app", "/Applications/Utilities/Terminal.app", "/Applications/readme.app"]
+    );
     assert_eq!(matched("suffix = \".app\", dir = false"), ["/Applications/readme.app"]);
-    assert_eq!(matched("parent = \"/Applications\", not_named = [\"Utilities\", \"readme.app\"]"), ["/Applications/Safari.app"]);
+    assert_eq!(
+        matched("parent = \"/Applications\", not_named = [\"Utilities\", \"readme.app\"]"),
+        ["/Applications/Safari.app"]
+    );
     assert_eq!(matched("prefix = \".\""), ["/Users/alex/.Trash", "/Users/alex/Documents/.Trash"]);
     assert_eq!(matched("parent = \"/Users\", not_path = [\"~\", \"/Users/missing\"]"), Vec::<String>::new());
-    assert_eq!(matched("parent = \"~\", dir = true, not_path = [\"~/Library\", \"~/Documents\", \"~/proj\", \"~/other\"]"), [
-        "/Users/alex/.Trash",
-        "/Users/alex/Photos.photoslibrary"
-    ]);
+    assert_eq!(
+        matched("parent = \"~\", dir = true, not_path = [\"~/Library\", \"~/Documents\", \"~/proj\", \"~/other\"]"),
+        ["/Users/alex/.Trash", "/Users/alex/Photos.photoslibrary"]
+    );
     assert_eq!(matched("name = \"target\", sibling = \"Cargo.toml\""), ["/Users/alex/proj/target"]);
-    assert_eq!(matched("parent = \"~/Documents\", min_bytes = 900"), [
-        "/Users/alex/Documents/new.bin",
-        "/Users/alex/Documents/old.bin",
-        "/Users/alex/Documents/undated.bin"
-    ]);
+    assert_eq!(
+        matched("parent = \"~/Documents\", min_bytes = 900"),
+        ["/Users/alex/Documents/new.bin", "/Users/alex/Documents/old.bin", "/Users/alex/Documents/undated.bin"]
+    );
     assert_eq!(matched("parent = \"~/Documents\", older_than_days = 180"), ["/Users/alex/Documents/old.bin"]);
 }
 
@@ -211,7 +211,15 @@ fn stamps_flags_and_records_the_strongest_rule() {
     let flags = |p: &str| f.arena.flags[f.id(p) as usize];
     let rule_id = |p: &str| hits.rule(f.id(p)).map(|i| policy.rule(i).id.as_str());
 
-    for p in ["/System", "/Applications", "/Users", HOME, "/Users/alex/Library", "/Users/alex/Library/Application Support", "/Users/alex/.Trash"] {
+    for p in [
+        "/System",
+        "/Applications",
+        "/Users",
+        HOME,
+        "/Users/alex/Library",
+        "/Users/alex/Library/Application Support",
+        "/Users/alex/.Trash",
+    ] {
         assert!(flags(p).contains(Flags::PROTECTED), "{p}");
         assert!(!flags(p).contains(Flags::RISKY), "{p}");
     }
@@ -300,18 +308,26 @@ fn keeps_only_the_outermost_cleanup_matches() {
         p
     };
     let utilities = f.id("/Applications/Utilities");
-    assert_eq!(paths(covering(&f.arena, all, |id| id == utilities)), [
-        "/Applications/Safari.app",
-        "/Applications/Utilities",
-        "/Applications/readme.app",
-        "/Users/alex/.Trash",
-        "/Users/alex/Documents",
-        "/Users/alex/Photos.photoslibrary",
-        "/Users/alex/other",
-        "/Users/alex/proj",
-    ]);
+    assert_eq!(
+        paths(covering(&f.arena, all, |id| id == utilities)),
+        [
+            "/Applications/Safari.app",
+            "/Applications/Utilities",
+            "/Applications/readme.app",
+            "/Users/alex/.Trash",
+            "/Users/alex/Documents",
+            "/Users/alex/Photos.photoslibrary",
+            "/Users/alex/other",
+            "/Users/alex/proj",
+        ]
+    );
 
-    let only_targets = policy.resolve(&f.arena, &f.index, &ctx()).cleanup_matches(&f.arena).into_iter().filter(|&(_, r)| r == 1).collect();
+    let only_targets = policy
+        .resolve(&f.arena, &f.index, &ctx())
+        .cleanup_matches(&f.arena)
+        .into_iter()
+        .filter(|&(_, r)| r == 1)
+        .collect();
     let proj = f.id("/Users/alex/proj");
     assert_eq!(paths(covering(&f.arena, only_targets, |id| id == proj)), ["/Users/alex/other/target"]);
 }

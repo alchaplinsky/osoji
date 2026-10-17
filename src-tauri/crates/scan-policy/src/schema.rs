@@ -132,7 +132,8 @@ pub fn parse(src: &str) -> Result<Vec<Rule>, PolicyError> {
             None => format!("#{}", i + 1),
         };
         let fail = |message: String| PolicyError::Rule { id: id.clone(), message };
-        let rule: Rule = toml::Value::Table(table).try_into().map_err(|e: toml::de::Error| fail(e.message().to_string()))?;
+        let rule: Rule =
+            toml::Value::Table(table).try_into().map_err(|e: toml::de::Error| fail(e.message().to_string()))?;
         validate(&rule).map_err(fail)?;
         if !seen.insert(rule.id.clone()) {
             return Err(PolicyError::DuplicateId(rule.id));

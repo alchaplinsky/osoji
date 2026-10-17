@@ -20,7 +20,8 @@ jobs:
       - run: bun run lint
       - run: bun run test
 
-  # scan-core and scan-policy are plain Rust with no platform calls, so they are checked here.
+  # Everything except scan-macos builds here: the app crate uses the portable jwalk walker on
+  # Linux (src-tauri/src/platform). The Tauri crates need the GTK/WebKit development libraries.
   rust:
     runs-on: ubuntu-latest
     steps:
@@ -31,16 +32,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: Tauri system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
       - name: Rust format
-        run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
+        run: cargo fmt --all --check --manifest-path src-tauri/Cargo.toml
       - name: Clippy
-        run: cargo clippy -p scan-core -p scan-policy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
+        run: cargo clippy --workspace --exclude scan-macos --all-targets --features webdriver --manifest-path src-tauri/Cargo.toml -- -D warnings
       - name: Rust tests
-        run: cargo test -p scan-core -p scan-policy --manifest-path src-tauri/Cargo.toml
+        run: cargo test --workspace --exclude scan-macos --manifest-path src-tauri/Cargo.toml
 
-  # The scanner (scan-macos) is built on getattrlistbulk and the app crate links it directly, so
-  # neither compiles on Linux. Only what needs the real app runs here: those crates' tests, their
-  # clippy pass, the debug build, and the e2e suite that drives it.
+  # scan-macos (getattrlistbulk) and the macOS platform module only compile here, and the e2e
+  # suite drives the app with that walker, the one that ships.
   app:
     runs-on: macos-latest
     steps:

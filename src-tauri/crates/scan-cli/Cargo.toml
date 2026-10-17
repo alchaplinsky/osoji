@@ -5,6 +5,8 @@ version.workspace = true
 
 [dependencies]
 scan-core = { path = "../scan-core" }
-scan-macos = { path = "../scan-macos" }
 clap = { version = "4", features = ["derive"] }
 libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+scan-macos = { path = "../scan-macos" }

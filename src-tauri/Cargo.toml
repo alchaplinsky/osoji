@@ -31,7 +31,6 @@ webdriver = ["dep:tauri-plugin-webdriver"]
 [dependencies]
 tauri-plugin-webdriver = { version = "0.2", optional = true }
 scan-core = { path = "crates/scan-core" }
-scan-macos = { path = "crates/scan-macos" }
 scan-policy = { path = "crates/scan-policy" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
@@ -47,6 +46,7 @@ libc = "0.2"
 # Non-blocking window zoom (src/zoom.rs). `default-features = false` because these crates'
 # defaults compile every class in the framework; only the handful the hook touches are named.
 [target.'cfg(target_os = "macos")'.dependencies]
+scan-macos = { path = "crates/scan-macos" }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = [
