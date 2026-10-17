@@ -1,4 +1,4 @@
-import type { DragEvent, KeyboardEvent } from "react";
+import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 import { Lock } from "lucide-react";
 import { Checkbox, Icon, Mono, cx } from "../../../components/ui";
 import GuardIcon from "../../../components/GuardIcon";
@@ -20,9 +20,11 @@ type ListRowProps = {
   onOpen?: () => void;
   onToggleBin?: () => void;
   onDragStart?: (e: DragEvent<HTMLDivElement>) => void;
+  onReveal?: () => void;
+  onContextMenu?: (e: MouseEvent<HTMLDivElement>) => void;
 };
 
-export default function ListRow({ name, sizeLabel, color, pct, dir, locked, hovered, inBin, guard, onEnter, onLeave, onOpen, onToggleBin, onDragStart }: ListRowProps) {
+export default function ListRow({ name, sizeLabel, color, pct, dir, locked, hovered, inBin, guard, onEnter, onLeave, onOpen, onToggleBin, onDragStart, onReveal, onContextMenu }: ListRowProps) {
   const binnable = !!onToggleBin;
   const open = dir ? onOpen : undefined;
   const onKeyDown = open
@@ -43,6 +45,9 @@ export default function ListRow({ name, sizeLabel, color, pct, dir, locked, hove
       draggable={binnable}
       onDragStart={onDragStart}
       onClick={open}
+      // A folder row opens on the first click, so only file rows reveal on double-click.
+      onDoubleClick={open ? undefined : onReveal}
+      onContextMenu={onContextMenu}
       onKeyDown={onKeyDown}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}

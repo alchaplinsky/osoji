@@ -1,4 +1,4 @@
-import type { DragEvent } from "react";
+import type { DragEvent, MouseEvent } from "react";
 import type { FileEntry } from "../../lib/types";
 import { ageText } from "../../lib/age";
 import { humanBytes } from "../../lib/format";
@@ -15,6 +15,7 @@ type LargestRowProps = {
   inBin: boolean;
   onToggleBin: () => void;
   onReveal: () => void;
+  onContextMenu?: (e: MouseEvent) => void;
 };
 
 function parentPath(path: string): string {
@@ -22,7 +23,7 @@ function parentPath(path: string): string {
   return slash > 0 ? path.slice(0, slash) : "/";
 }
 
-export default function LargestRow({ entry, safe, inBin, onToggleBin, onReveal }: LargestRowProps) {
+export default function LargestRow({ entry, safe, inBin, onToggleBin, onReveal, onContextMenu }: LargestRowProps) {
   const locked = isProtected(entry);
   return (
     <div
@@ -30,6 +31,7 @@ export default function LargestRow({ entry, safe, inBin, onToggleBin, onReveal }
       draggable={!locked}
       onDragStart={locked ? undefined : (e: DragEvent) => startBinDrag(e, entry.id)}
       onDoubleClick={onReveal}
+      onContextMenu={onContextMenu}
       title={entry.path}
     >
       {locked ? (

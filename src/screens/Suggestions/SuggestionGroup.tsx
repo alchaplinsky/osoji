@@ -1,5 +1,6 @@
 import { Mono, cx } from "../../components/ui";
-import { toBinItem } from "../../lib/bin";
+import { isProtected, toBinItem } from "../../lib/bin";
+import type { OpenItemMenu } from "../../hooks/useItemMenu";
 import { humanBytes } from "../../lib/format";
 import type { BinItem, Safety, Suggestion } from "../../lib/types";
 import SuggestionCard from "./SuggestionCard";
@@ -12,9 +13,10 @@ type SuggestionGroupProps = {
   items: Suggestion[];
   binIds: ReadonlySet<number>;
   onToggleBin: (item: BinItem) => void;
+  onItemMenu?: OpenItemMenu;
 };
 
-export default function SuggestionGroup({ safety, title, desc, items, binIds, onToggleBin }: SuggestionGroupProps) {
+export default function SuggestionGroup({ safety, title, desc, items, binIds, onToggleBin, onItemMenu }: SuggestionGroupProps) {
   const total = items.reduce((sum, s) => sum + s.size, 0);
   return (
     <div className={styles.group}>
@@ -26,7 +28,23 @@ export default function SuggestionGroup({ safety, title, desc, items, binIds, on
       </div>
       <div className={styles.grid}>
         {items.map((s) => (
-          <SuggestionCard key={s.id} suggestion={s} inBin={binIds.has(s.id)} onToggle={() => onToggleBin(toBinItem(s))} />
+          <SuggestionCard
+            key={s.id}
+            suggestion={s}
+            inBin={binIds.has(s.id)}
+            onToggle={() => onToggleBin(toBinItem(s))}
+            onContextMenu={
+              onItemMenu &&
+              ((e) =>
+                onItemMenu(e, {
+                  id: s.id,
+                  path: s.path,
+                  inBin: binIds.has(s.id),
+                  // The card offers a bin button only for safe and review items; the menu matches it.
+                  onToggleBin: s.safety === "safe" || s.safety === "review" ? (isProtected(s) ? undefined : () => onToggleBin(toBinItem(s))) : undefined,
+                }))
+            }
+          />
         ))}
       </div>
     </div>

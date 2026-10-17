@@ -10,7 +10,7 @@ import MoonLabels from "./MoonLabels";
 import { CORE, RINGS, orbitGeometry, placeMoons } from "./moons";
 import styles from "./Orbit.module.css";
 
-export default function Orbit({ view, theme, hoverId, onHover, onDrill, onUp, onSelectFile, centerSize = 20, className }: VizProps) {
+export default function Orbit({ view, theme, hoverId, onHover, onDrill, onUp, onSelectFile, onContextMenu, centerSize = 20, className }: VizProps) {
   const [rootRef, size] = useElementSize<HTMLDivElement>();
   const slices = useMemo(() => visibleSlices(view, theme), [view, theme]);
   const related = useMemo(() => relatedKeys(view, hoverId), [view, hoverId]);
@@ -37,7 +37,7 @@ export default function Orbit({ view, theme, hoverId, onHover, onDrill, onUp, on
                   r={r}
                   fill={slice.fill}
                   style={{ opacity: relatedOpacity(related, slice.key) }}
-                  {...pointerProps(slice.node, slice.hover, { onHover, onDrill, onSelectFile })}
+                  {...pointerProps(slice.node, slice.hover, { onHover, onDrill, onSelectFile, onContextMenu })}
                 />
               ))}
             </g>

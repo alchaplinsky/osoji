@@ -9,7 +9,7 @@ import { squarify } from "./squarify";
 import Tile from "./Tile";
 import styles from "./Treemap.module.css";
 
-export default function Treemap({ view, theme, hoverId, onHover, onDrill, onSelectFile, onDragStart, className }: VizProps) {
+export default function Treemap({ view, theme, hoverId, onHover, onDrill, onSelectFile, onDragStart, onContextMenu, className }: VizProps) {
   const [rootRef, size] = useElementSize<HTMLDivElement>();
   const slices = useMemo(() => visibleSlices(view, theme), [view, theme]);
   const related = useMemo(() => relatedKeys(view, hoverId), [view, hoverId]);
@@ -25,7 +25,7 @@ export default function Treemap({ view, theme, hoverId, onHover, onDrill, onSele
           theme={theme}
           hovered={hoverId !== null && hoverId === slice.hover}
           opacity={relatedOpacity(related, slice.key)}
-          {...pointerProps(slice.node, slice.hover, { onHover, onDrill, onSelectFile })}
+          {...pointerProps(slice.node, slice.hover, { onHover, onDrill, onSelectFile, onContextMenu })}
           {...dragProps(slice.node, onDragStart)}
         />
       ))}

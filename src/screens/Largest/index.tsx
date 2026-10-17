@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import type { BinItem, FileEntry } from "../../lib/types";
 import { isOlderThan } from "../../lib/age";
-import { toBinItem } from "../../lib/bin";
+import { isProtected, toBinItem } from "../../lib/bin";
+import type { OpenItemMenu } from "../../hooks/useItemMenu";
 import Toolbar, { ToolbarTitle } from "../../components/Toolbar";
 import { Panel, SegmentedControl, type SegmentOption } from "../../components/ui";
 import BinBar from "../Breakdown/BinBar";
@@ -17,6 +18,7 @@ type LargestScreenProps = {
   onRemoveFromBin: (id: number) => void;
   onReview: () => void;
   onReveal: (id: number) => void;
+  onItemMenu?: OpenItemMenu;
 };
 
 type Filter = "all" | "safe" | "old";
@@ -27,7 +29,7 @@ const FILTERS: readonly SegmentOption<Filter>[] = [
   { value: "old", label: "Over a year old" },
 ];
 
-export default function LargestScreen({ entries, safeIds, binItems, binIds, onToggleBin, onRemoveFromBin, onReview, onReveal }: LargestScreenProps) {
+export default function LargestScreen({ entries, safeIds, binItems, binIds, onToggleBin, onRemoveFromBin, onReview, onReveal, onItemMenu }: LargestScreenProps) {
   const [filter, setFilter] = useState<Filter>("all");
 
   const safe = useMemo(
@@ -63,6 +65,16 @@ export default function LargestScreen({ entries, safeIds, binItems, binIds, onTo
               inBin={binIds.has(entry.id)}
               onToggleBin={() => onToggleBin(toBinItem(entry))}
               onReveal={() => onReveal(entry.id)}
+              onContextMenu={
+                onItemMenu &&
+                ((e) =>
+                  onItemMenu(e, {
+                    id: entry.id,
+                    path: entry.path,
+                    inBin: binIds.has(entry.id),
+                    onToggleBin: isProtected(entry) ? undefined : () => onToggleBin(toBinItem(entry)),
+                  }))
+              }
             />
           ))}
         </div>

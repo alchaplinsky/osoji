@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import Sidebar, { type RootChoice } from "./components/Sidebar";
 import ReviewSheet from "./components/ReviewSheet";
@@ -19,10 +19,11 @@ import { useTheme } from "./hooks/useTheme";
 import { useSettings } from "./hooks/useSettings";
 import { useFullDiskAccess } from "./hooks/useFullDiskAccess";
 import { useShortcuts } from "./hooks/useShortcuts";
+import { useItemMenu } from "./hooks/useItemMenu";
 import { homeDir, nodeInfo, reveal, trashInfo, trashNodes, volumeInfo, volumes as listVolumes } from "./lib/api";
 import type { TrashInfo, TrashProgress } from "./lib/api";
 import { humanBytes } from "./lib/format";
-import { reviewWarning } from "./lib/bin";
+import { isProtected, reviewWarning } from "./lib/bin";
 import { expectedBytes } from "./lib/scanEstimate";
 import { useScanTotals } from "./hooks/useScanTotals";
 import { pathTo } from "./lib/tree";
@@ -38,6 +39,7 @@ export default function App() {
   const insights = useInsights();
   const watchers = useWatchers();
   const bin = useBin();
+  const itemMenu = useItemMenu();
   const { theme } = useTheme();
   const fda = useFullDiskAccess();
   const { confirmBig, watchers: watchersOn } = useSettings();
@@ -179,6 +181,16 @@ export default function App() {
     if (item) bin.toggle(item);
   };
 
+  const revealItem = (id: number) => reveal(id).catch(console.error);
+
+  const openNodeMenu = (e: MouseEvent, id: number) => {
+    const item = describe(id);
+    if (item) itemMenu.open(e, { id, path: item.path, inBin: bin.ids.has(id), onToggleBin: isProtected(item) ? undefined : () => bin.toggle(item) });
+  };
+
+  const openReviewMenu = (e: MouseEvent, item: BinItem) =>
+    itemMenu.open(e, { id: item.id, path: item.path, inBin: true, onToggleBin: sweeping ? undefined : () => bin.remove(item.id) });
+
   const showToast = (title: string, sub: string) => {
     window.clearTimeout(toastTimer.current);
     setToast({ title, sub });
@@ -305,7 +317,9 @@ export default function App() {
             listOpen={listOpen}
             onToggleList={() => setListOpen((o) => !o)}
             onRescan={startScan}
-            onReveal={() => reveal(explorer.currentId).catch(console.error)}
+            onReveal={() => revealItem(explorer.currentId)}
+            onRevealItem={revealItem}
+            onItemMenu={openNodeMenu}
             onToggleBin={toggleBinById}
             banner={askForAccess && <FdaBanner unreadable={unreadable} onOpenSettings={fda.openSettings} onDismiss={fda.dismiss} />}
             unreadable={unreadable}
@@ -317,7 +331,8 @@ export default function App() {
             entries={insights.largest}
             safeIds={insights.safeIds}
             onToggleBin={bin.toggle}
-            onReveal={(id) => reveal(id).catch(console.error)}
+            onReveal={revealItem}
+            onItemMenu={itemMenu.open}
             {...binProps}
           />
         )}
@@ -327,6 +342,7 @@ export default function App() {
             onToggleBin={bin.toggle}
             onAddAll={(items) => items.forEach(bin.add)}
             onRemoveMany={(ids) => ids.forEach(bin.remove)}
+            onItemMenu={itemMenu.open}
             {...binProps}
           />
         )}
@@ -357,7 +373,9 @@ export default function App() {
           setSweepError(null);
         }}
         onConfirm={confirmSweep}
+        onItemMenu={openReviewMenu}
       />
+      {itemMenu.element}
     </div>
   );
 }

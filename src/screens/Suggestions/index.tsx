@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import Toolbar, { ToolbarTitle } from "../../components/Toolbar";
 import { Button, Mono } from "../../components/ui";
 import { toBinItem } from "../../lib/bin";
+import type { OpenItemMenu } from "../../hooks/useItemMenu";
 import { humanBytes } from "../../lib/format";
 import type { BinItem, Safety, Suggestion } from "../../lib/types";
 import BinBar from "../Breakdown/BinBar";
@@ -17,6 +18,7 @@ type SuggestionsScreenProps = {
   onRemoveMany: (ids: number[]) => void;
   onRemoveFromBin: (id: number) => void;
   onReview: () => void;
+  onItemMenu?: OpenItemMenu;
 };
 
 const GROUPS: { safety: Safety; title: string; desc: string }[] = [
@@ -35,6 +37,7 @@ export default function SuggestionsScreen({
   onRemoveMany,
   onRemoveFromBin,
   onReview,
+  onItemMenu,
 }: SuggestionsScreenProps) {
   const bySafety = useMemo(() => {
     const groups: Record<Safety, Suggestion[]> = { safe: [], review: [], keep: [], unexpected: [] };
@@ -78,7 +81,7 @@ export default function SuggestionsScreen({
             {GROUPS.map(
               (g) =>
                 bySafety[g.safety].length > 0 && (
-                  <SuggestionGroup key={g.safety} {...g} items={bySafety[g.safety]} binIds={binIds} onToggleBin={onToggleBin} />
+                  <SuggestionGroup key={g.safety} {...g} items={bySafety[g.safety]} binIds={binIds} onToggleBin={onToggleBin} onItemMenu={onItemMenu} />
                 ),
             )}
           </>

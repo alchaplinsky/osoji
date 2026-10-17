@@ -17,11 +17,12 @@ type SunburstProps = {
   onDrill: (id: number) => void;
   onUp: () => void;
   onSelectFile?: (id: number) => void;
+  onContextMenu?: (e: MouseEvent, id: number) => void;
   centerSize?: number;
   className?: string;
 };
 
-export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp, onSelectFile, centerSize = 20, className }: SunburstProps) {
+export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp, onSelectFile, onContextMenu, centerSize = 20, className }: SunburstProps) {
   const [rootRef, size] = useElementSize<HTMLDivElement>();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [pointer, setPointer] = useState(false);
@@ -74,6 +75,10 @@ export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp,
           if (hit === "center") onUp();
           else if (hit?.node?.dir) onDrill(hit.node.id);
           else if (hit?.node) onSelectFile?.(hit.node.id);
+        }}
+        onContextMenu={(e) => {
+          const hit = locate(e);
+          if (hit && hit !== "center" && hit.node) onContextMenu?.(e, hit.node.id);
         }}
       />
       <CenterLabel view={view} size={centerSize} />
