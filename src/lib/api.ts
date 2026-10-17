@@ -1,7 +1,9 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { FileEntry, Suggestion } from "./types";
 
-export type ProgressMsg = { files: number; dirs: number; bytes: number; errors: number; elapsed_ms: number };
+/** Bytes found so far under one of the scan root's direct children. */
+export type TopProgress = { name: string; bytes: number };
+export type ProgressMsg = { files: number; dirs: number; bytes: number; errors: number; elapsed_ms: number; tops: TopProgress[]; rest: number };
 export type ScanSummary = { root: string; entries: number; bytes: number; errors: number; elapsed_ms: number; cancelled: boolean };
 export type ViewNode = {
   id: number; name: string; size: number; items: number; dir: boolean; error: boolean;

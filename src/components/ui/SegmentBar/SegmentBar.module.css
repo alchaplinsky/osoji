@@ -1,0 +1,14 @@
+.track {
+  display: flex;
+  gap: 2px;
+  height: var(--h);
+  border-radius: calc(var(--h) / 2);
+  overflow: hidden;
+  background: var(--line);
+}
+
+/* No transition here: callers drive the sizes, eased or not. */
+.segment {
+  flex: none;
+  height: 100%;
+}

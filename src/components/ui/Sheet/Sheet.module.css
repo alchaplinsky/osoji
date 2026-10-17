@@ -7,7 +7,7 @@
   justify-content: center;
   background: var(--overlay);
   backdrop-filter: blur(10px);
-  animation: fadeIn .25s ease-out;
+  animation: var(--kf-fadeIn) .25s ease-out;
 }
 
 .sheet {
@@ -22,7 +22,7 @@
   border: 1px solid var(--line2);
   box-shadow: var(--shadow-sheet);
   backdrop-filter: blur(30px);
-  animation: sheetIn .45s var(--ease-spring-soft);
+  animation: var(--kf-sheetIn) .45s var(--ease-spring-soft);
 }
 
 .head { padding: 22px 24px 12px; }

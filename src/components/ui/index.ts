@@ -7,6 +7,8 @@ export type { SafetyTone } from "./Badge";
 export { default as Checkbox } from "./Checkbox";
 export { default as Toggle } from "./Toggle";
 export { default as ProgressBar } from "./ProgressBar";
+export { default as SegmentBar } from "./SegmentBar";
+export type { Segment } from "./SegmentBar";
 export { Eyebrow, Mono } from "./Text";
 export { Card, Panel, StatTile } from "./Surface";
 export { default as Menu } from "./Menu";

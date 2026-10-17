@@ -53,7 +53,8 @@ pub struct Interner { buf: Vec<u8> }
 pub struct ScanConfig { root: PathBuf, excludes: GlobSet, cross_mounts: bool,
   small_file_bucket: u64, threads: usize, clone_pass: bool }
 pub struct ScanCtl { cancel: Arc<AtomicBool>, progress: Arc<Progress> }
-pub struct Progress { files: AtomicU64, bytes: AtomicU64, dirs: AtomicU64, errors: AtomicU64 }
+pub struct Progress { files: AtomicU64, bytes: AtomicU64, dirs: AtomicU64, errors: AtomicU64,
+  top_bytes: [AtomicU64; 48], top_names: Mutex<Vec<Vec<u8>>>, rest: AtomicU64 }  // bytes per direct child of the root
 ```
 
 ## Invariants

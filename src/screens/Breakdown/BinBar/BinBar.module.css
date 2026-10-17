@@ -75,7 +75,7 @@
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
-  animation: popIn .35s var(--ease-spring-hard);
+  animation: var(--kf-popIn) .35s var(--ease-spring-hard);
 }
 
 .chipName {

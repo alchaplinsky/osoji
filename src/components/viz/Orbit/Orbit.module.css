@@ -4,7 +4,7 @@
   align-self: stretch;
   min-width: 0;
   min-height: 0;
-  animation: popIn .5s var(--ease-spring-soft);
+  animation: var(--kf-popIn) .5s var(--ease-spring-soft);
 }
 
 .svg {
@@ -21,7 +21,7 @@
   opacity: .6;
 }
 
-.spin { animation: spin 140s linear infinite; }
+.spin { animation: var(--kf-spin) 140s linear infinite; }
 
 .moon {
   cursor: pointer;
@@ -40,14 +40,14 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  animation: spin 140s linear infinite;
+  animation: var(--kf-spin) 140s linear infinite;
 }
 
 .label {
   position: absolute;
   width: 120px;
   text-align: center;
-  animation: spinRev 140s linear infinite;
+  animation: var(--kf-spinRev) 140s linear infinite;
   transition: opacity .25s;
 }
 

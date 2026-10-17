@@ -13,7 +13,7 @@
   border: 1px solid var(--line);
   box-shadow: var(--shadow-float);
   backdrop-filter: blur(20px);
-  animation: popIn .3s var(--ease-spring);
+  animation: var(--kf-popIn) .3s var(--ease-spring);
 }
 
 .item {

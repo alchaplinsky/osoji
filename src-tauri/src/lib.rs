@@ -28,12 +28,22 @@ struct AppState {
 }
 
 #[derive(Serialize, Clone)]
+struct TopProgress {
+    name: String,
+    bytes: u64,
+}
+
+#[derive(Serialize, Clone)]
 struct ProgressMsg {
     files: u64,
     dirs: u64,
     bytes: u64,
     errors: u64,
     elapsed_ms: u64,
+    /// Bytes found under each of the root's first direct children, in listing order.
+    tops: Vec<TopProgress>,
+    /// Bytes under children past the tracked ones.
+    rest: u64,
 }
 
 #[derive(Serialize)]
@@ -205,6 +215,8 @@ async fn start_scan(
                     bytes: progress.bytes.load(Ordering::Relaxed),
                     errors: progress.errors.load(Ordering::Relaxed),
                     elapsed_ms: t0.elapsed().as_millis() as u64,
+                    tops: progress.tops().into_iter().map(|(name, bytes)| TopProgress { name, bytes }).collect(),
+                    rest: progress.rest(),
                 });
             }
         })

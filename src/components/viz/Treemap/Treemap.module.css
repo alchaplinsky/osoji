@@ -4,7 +4,7 @@
   align-self: stretch;
   min-width: 0;
   min-height: 0;
-  animation: popIn .5s var(--ease-spring-soft);
+  animation: var(--kf-popIn) .5s var(--ease-spring-soft);
 }
 
 .tile {

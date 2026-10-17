@@ -195,15 +195,72 @@ impl HardlinkSet {
     }
 }
 
-#[derive(Default)]
+/// How many of the root's direct children get their own progress counter. Slots are fixed so
+/// attribution on the hot path is a single relaxed atomic add; later children share `rest`.
+pub const MAX_TOPS: usize = 48;
+
 pub struct Progress {
     pub files: AtomicU64,
     pub dirs: AtomicU64,
     pub bytes: AtomicU64,
     pub errors: AtomicU64,
+    top_bytes: [AtomicU64; MAX_TOPS],
+    top_names: Mutex<Vec<Vec<u8>>>,
+    rest: AtomicU64,
+}
+
+impl Default for Progress {
+    fn default() -> Self {
+        Self {
+            files: AtomicU64::new(0),
+            dirs: AtomicU64::new(0),
+            bytes: AtomicU64::new(0),
+            errors: AtomicU64::new(0),
+            top_bytes: std::array::from_fn(|_| AtomicU64::new(0)),
+            top_names: Mutex::new(Vec::new()),
+            rest: AtomicU64::new(0),
+        }
+    }
 }
 
 impl Progress {
+    /// Slot for bytes that belong to no registered top-level child.
+    pub const REST: u32 = u32::MAX;
+
+    /// Give a direct child of the root its own counter. Returns `REST` once every slot is taken.
+    pub fn register_top(&self, name: &[u8]) -> u32 {
+        let mut names = self.top_names.lock().unwrap();
+        if names.len() >= MAX_TOPS {
+            return Self::REST;
+        }
+        names.push(name.to_vec());
+        (names.len() - 1) as u32
+    }
+
+    pub fn add_top(&self, top: u32, bytes: u64) {
+        if bytes == 0 {
+            return;
+        }
+        match self.top_bytes.get(top as usize) {
+            Some(slot) => slot.fetch_add(bytes, Ordering::Relaxed),
+            None => self.rest.fetch_add(bytes, Ordering::Relaxed),
+        };
+    }
+
+    /// Bytes found so far under each registered top-level child, in registration order.
+    pub fn tops(&self) -> Vec<(String, u64)> {
+        let names = self.top_names.lock().unwrap();
+        names
+            .iter()
+            .zip(&self.top_bytes)
+            .map(|(name, bytes)| (String::from_utf8_lossy(name).into_owned(), bytes.load(Ordering::Relaxed)))
+            .collect()
+    }
+
+    pub fn rest(&self) -> u64 {
+        self.rest.load(Ordering::Relaxed)
+    }
+
     pub fn add(&self, files: u64, dirs: u64, bytes: u64, errors: u64) {
         if files != 0 {
             self.files.fetch_add(files, Ordering::Relaxed);
@@ -227,4 +284,30 @@ pub struct ScanConfig {
     pub cross_mounts: bool,
     /// Run workers at user-initiated QoS so macOS schedules them on P-cores.
     pub qos: bool,
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+
+    #[test]
+    fn tracks_bytes_per_registered_top_and_overflows_to_rest() {
+        let p = Progress::default();
+        let a = p.register_top(b"a");
+        let b = p.register_top(b"b");
+        p.add_top(a, 10);
+        p.add_top(b, 5);
+        p.add_top(a, 1);
+        assert_eq!(p.tops(), vec![("a".to_string(), 11), ("b".to_string(), 5)]);
+        assert_eq!(p.rest(), 0);
+
+        for i in 0..MAX_TOPS {
+            p.register_top(format!("extra{i}").as_bytes());
+        }
+        let overflow = p.register_top(b"late");
+        assert_eq!(overflow, Progress::REST);
+        p.add_top(overflow, 7);
+        assert_eq!(p.rest(), 7);
+        assert_eq!(p.tops().len(), MAX_TOPS);
+    }
 }
