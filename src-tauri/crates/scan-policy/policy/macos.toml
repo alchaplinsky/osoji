@@ -160,8 +160,8 @@ match = { path = "~/Library/Application Support" }
 
 [[rule]]
 id = "trash"
-kind = "protected"
-reason = "Already in the Trash. Empty the Trash from Finder."
+kind = "trash"
+reason = "Already in the Trash. Empty the Trash from Finder to reclaim the space."
 match = { parent = "~", name = ".Trash", dir = true }
 
 # Risky: allowed, but the review asks twice.

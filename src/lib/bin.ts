@@ -2,7 +2,9 @@ import type { BinItem, FileEntry, Guard } from "./types";
 
 export const toBinItem = ({ id, name, path, size, dir, ancestors, guard }: FileEntry): BinItem => ({ id, name, path, size, dir, ancestors, guard });
 
-export const isProtected = (item: { guard?: Guard | null }) => item.guard?.kind === "protected";
+export const isTrash = (item: { guard?: Guard | null }) => item.guard?.kind === "trash";
+
+export const isProtected = (item: { guard?: Guard | null }) => item.guard?.kind === "protected" || isTrash(item);
 
 export const isRisky = (item: { guard?: Guard | null }) => item.guard?.kind === "risky";
 

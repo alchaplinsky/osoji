@@ -25,6 +25,8 @@ bitflags! {
         const PROTECTED = 128;
         const RISKY = 256;
         const UNEXPECTED = 512;
+        /// The user's Trash folder: real space, but never swept and never suggested.
+        const TRASH_FOLDER = 1024;
     }
 }
 

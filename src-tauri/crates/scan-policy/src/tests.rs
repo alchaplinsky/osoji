@@ -93,7 +93,8 @@ fn rule_error(src: &str) -> (String, String) {
 #[test]
 fn bundled_policies_load() {
     let macos = Policy::from_toml(MACOS).unwrap();
-    assert!(macos.rules().iter().all(|r| matches!(r.kind, Kind::Protected | Kind::Risky)));
+    assert!(macos.rules().iter().all(|r| matches!(r.kind, Kind::Protected | Kind::Risky | Kind::Trash)));
+    assert_eq!(macos.rules().iter().filter(|r| r.kind == Kind::Trash).count(), 1);
     assert!(macos.rules().iter().any(|r| r.id == "home"));
     assert!(Policy::from_toml(LINUX).unwrap().rules().is_empty());
     assert!(Policy::from_toml(WINDOWS).unwrap().rules().is_empty());
@@ -208,7 +209,9 @@ fn stamps_flags_and_records_the_strongest_rule() {
         assert!(!flags(p).contains(Flags::RISKY), "{p}");
     }
     assert_eq!(rule_id("/Users/alex/.Trash"), Some("trash"));
-    assert!(!flags("/Users/alex/Documents/.Trash").intersects(Flags::PROTECTED | Flags::RISKY));
+    assert!(flags("/Users/alex/.Trash").contains(Flags::TRASH_FOLDER));
+    assert_eq!(f.arena.count_flag(Flags::TRASH_FOLDER), 1);
+    assert!(!flags("/Users/alex/Documents/.Trash").intersects(Flags::PROTECTED | Flags::RISKY | Flags::TRASH_FOLDER));
 
     for p in ["/Applications/Safari.app", "/Applications/Utilities/Terminal.app", "/Users/alex/Photos.photoslibrary"] {
         assert!(flags(p).contains(Flags::RISKY), "{p}");
@@ -222,6 +225,34 @@ fn stamps_flags_and_records_the_strongest_rule() {
     assert_eq!(rule_id("/Users/alex/Documents"), Some("docs-protected"));
     assert!(policy.rules().iter().all(|r| r.kind != Kind::Unexpected));
     assert_eq!(f.arena.count_flag(Flags::UNEXPECTED), 0);
+}
+
+#[test]
+fn trash_rules_protect_the_folder_and_win_over_protected() {
+    let mut f = fixture();
+    let src = r#"
+        version = 1
+        [[rule]]
+        id = "keep"
+        kind = "protected"
+        reason = "Keep it."
+        match = { name = ".Trash" }
+        [[rule]]
+        id = "bin"
+        kind = "trash"
+        reason = "In the Trash."
+        match = { parent = "~", name = ".Trash", dir = true }
+    "#;
+    let policy = Policy::from_toml(src).unwrap();
+    let hits = policy.resolve(&f.arena, &f.index, &ctx()).stamp(&mut f.arena);
+
+    let trash = f.id("/Users/alex/.Trash");
+    assert_eq!(f.arena.flags[trash as usize], Flags::DIR | Flags::TRASH_FOLDER | Flags::PROTECTED);
+    assert_eq!(policy.rule(hits.rule(trash).unwrap()).kind.as_str(), "trash");
+
+    let nested = f.id("/Users/alex/Documents/.Trash");
+    assert_eq!(f.arena.flags[nested as usize], Flags::DIR | Flags::PROTECTED);
+    assert_eq!(policy.rule(hits.rule(nested).unwrap()).id, "keep");
 }
 
 #[test]

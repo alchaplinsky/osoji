@@ -1,9 +1,9 @@
 import type { ThemeName } from "../../design/theme";
-import { neutral, tone } from "../../design/palette";
+import { neutral } from "../../design/palette";
 import type { NodeInfo, ViewNode } from "../../lib/api";
 import type { HoverId } from "../../lib/types";
 import { findNode, pathTo } from "../../lib/tree";
-import type { Slice } from "./slices";
+import { nodeFill, nodeName, type Slice } from "./slices";
 
 export type HoverTarget = { name: string; size: number; pct: number; fill: string; error: boolean };
 
@@ -23,7 +23,7 @@ export function hoverTarget(view: ViewNode, root: ViewNode, theme: ThemeName, ho
     const node = path.at(-1);
     if (!node || path.length < 2) continue;
     const top = tree.children.indexOf(path[1]);
-    return { name: node.name, size: node.size, pct: share(node.size, tree), fill: tone(theme, top), error: node.error };
+    return { name: nodeName(node), size: node.size, pct: share(node.size, tree), fill: nodeFill(path[1], theme, top), error: node.error };
   }
   return null;
 }
