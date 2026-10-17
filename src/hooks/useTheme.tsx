@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { applyTheme, isLayout, isTheme, type LayoutName, type ThemeName } from "../design/theme";
+import { chartVars } from "../design/palette";
 
 const STORAGE_KEY = "unshift.appearance";
 
@@ -25,6 +26,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     applyTheme(appearance.theme, appearance.layout);
+    const root = document.documentElement.style;
+    for (const [name, value] of Object.entries(chartVars(appearance.theme))) root.setProperty(name, value);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(appearance));
   }, [appearance]);
 

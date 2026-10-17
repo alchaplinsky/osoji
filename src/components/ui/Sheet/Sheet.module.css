@@ -18,10 +18,11 @@
   flex-direction: column;
   overflow: hidden;
   border-radius: var(--radius-3xl);
-  background: var(--card);
+  /* A top sheen over the theme's sheet fill; the card fill is too thin in glass and let the chart through. */
+  background: linear-gradient(180deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, 0) 38%), var(--sheet);
   border: 1px solid var(--line2);
-  box-shadow: var(--shadow-sheet);
-  backdrop-filter: blur(30px);
+  box-shadow: var(--shadow-sheet), inset 0 1px 0 rgba(255, 255, 255, .12);
+  backdrop-filter: blur(70px) saturate(1.4);
   animation: var(--kf-sheetIn) .45s var(--ease-spring-soft);
 }
 

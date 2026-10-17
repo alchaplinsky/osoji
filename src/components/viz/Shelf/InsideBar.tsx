@@ -1,5 +1,5 @@
 import type { ThemeName } from "../../../design/theme";
-import { hueAt, shade } from "../../../design/palette";
+import { tone } from "../../../design/palette";
 import type { ViewNode } from "../../../lib/api";
 import { humanBytes } from "../../../lib/format";
 import { relatedOpacity, type SliceKey } from "../../Sunburst/layout";
@@ -34,7 +34,7 @@ export default function InsideBar({ focus, theme, related, actions }: InsideBarP
             <div
               key={child.id}
               className={styles.insideSegment}
-              style={{ width: `${pct}%`, background: shade(theme, hueAt(i), 2), opacity: relatedOpacity(related, child.id) }}
+              style={{ width: `${pct}%`, background: tone(theme, i, 2), opacity: relatedOpacity(related, child.id) }}
               {...pointerProps(child, child.id, actions)}
             >
               {pct >= LABEL_SHARE && <span className={styles.insideLabel}>{child.name}</span>}

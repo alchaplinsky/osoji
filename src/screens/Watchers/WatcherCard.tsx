@@ -51,7 +51,7 @@ export default function WatcherCard({ status, scanned, onRemove, onSetLimit, onC
         <ProgressBar
           className={styles.bar}
           value={found ? (size / limit) * 100 : 0}
-          color={over ? "var(--review)" : "var(--ac)"}
+          color={over ? "var(--review)" : undefined}
         />
         <Mono className={cx(styles.status, over ? styles.over : found ? styles.under : styles.unknown)}>{text}</Mono>
       </div>
