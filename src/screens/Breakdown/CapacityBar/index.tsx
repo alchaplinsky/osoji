@@ -65,11 +65,11 @@ export default function CapacityBar({ volume, root, hoverId, onHover, onOpen, pe
             title={notScanned.title}
           />
         )}
-        {/* Absolute, so the hidden segment above does not move it: it always ends at `used`. */}
+        {/* Absolute, over the tail of the scanned items the sweep will remove, not over the unscanned space. */}
         {pending > 0 && (
           <div
             className={styles.pendingStripe}
-            style={{ left: `${((used - pending) / volume.total) * 100}%`, width: `${(pending / volume.total) * 100}%` }}
+            style={{ left: `${((used - hidden - pending) / volume.total) * 100}%`, width: `${(pending / volume.total) * 100}%` }}
           />
         )}
       </div>
