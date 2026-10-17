@@ -13,7 +13,7 @@ export type BinItem = { id: number; name: string; path: string; size: number; di
 
 export type FileEntry = { id: number; name: string; path: string; size: number; mtime: number; dir: boolean; ancestors: number[]; guard?: Guard | null };
 
-export type Safety = "safe" | "review" | "keep";
+export type Safety = "safe" | "review" | "keep" | "unexpected";
 
 export type Suggestion = FileEntry & { safety: Safety; reason: string };
 
