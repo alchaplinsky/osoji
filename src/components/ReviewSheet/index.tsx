@@ -52,7 +52,7 @@ export default function ReviewSheet({ open, items, volumeName, busy, progress, e
             <div>
               <ProgressBar value={progress.total > 0 ? (progress.done / progress.total) * 100 : 100} label="Moving to the Trash" />
               <div className={styles.progressLabel}>
-                Moving {progress.current} · {progress.done} of {progress.total}
+                Moving {progress.current} · {Math.min(progress.done + 1, progress.total)} of {progress.total}
               </div>
             </div>
           )}
