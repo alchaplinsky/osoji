@@ -1,3 +1,4 @@
+import type { MouseEvent } from "react";
 import type { ThemeName } from "../../../design/theme";
 import type { ViewNode } from "../../../lib/api";
 import type { HoverId } from "../../../lib/types";
@@ -16,9 +17,11 @@ type ListPanelProps = {
   onOpen: (id: number) => void;
   binIds: ReadonlySet<number>;
   onToggleBin: (id: number) => void;
+  onReveal?: (id: number) => void;
+  onItemMenu?: (e: MouseEvent, id: number) => void;
 };
 
-export default function ListPanel({ view, theme, hoverId, onHover, onOpen, binIds, onToggleBin }: ListPanelProps) {
+export default function ListPanel({ view, theme, hoverId, onHover, onOpen, binIds, onToggleBin, onReveal, onItemMenu }: ListPanelProps) {
   const slices = slicesOf(view, theme);
   const largest = slices[0]?.size || 1;
   const count = view.children.length + view.other_count;
@@ -47,6 +50,8 @@ export default function ListPanel({ view, theme, hoverId, onHover, onOpen, binId
             onOpen={node ? () => onOpen(node.id) : undefined}
             onToggleBin={node ? () => onToggleBin(node.id) : undefined}
             onDragStart={node ? (e) => startBinDrag(e, node.id) : undefined}
+            onReveal={node && onReveal ? () => onReveal(node.id) : undefined}
+            onContextMenu={node && onItemMenu ? (e) => onItemMenu(e, node.id) : undefined}
           />
         ))}
       </div>

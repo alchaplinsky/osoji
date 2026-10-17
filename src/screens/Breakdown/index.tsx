@@ -1,4 +1,4 @@
-import { useMemo, type ComponentType } from "react";
+import { useMemo, type ComponentType, type MouseEvent } from "react";
 import type { ThemeName } from "../../design/theme";
 import type { NodeInfo, ViewNode } from "../../lib/api";
 import type { BinItem, HoverId, Viz, Volume } from "../../lib/types";
@@ -32,6 +32,10 @@ type BreakdownScreenProps = {
   onViz: (v: Viz) => void;
   onRescan: () => void;
   onReveal: () => void;
+  /** Reveal one item in the current view (double-click on a file row). */
+  onRevealItem?: (id: number) => void;
+  /** Right-click on an item in the chart or the list. */
+  onItemMenu?: (e: MouseEvent, id: number) => void;
   binItems: BinItem[];
   binIds?: ReadonlySet<number>;
   onToggleBin: (id: number) => void;
@@ -66,6 +70,8 @@ export default function BreakdownScreen({
   onViz,
   onRescan,
   onReveal,
+  onRevealItem,
+  onItemMenu,
   binItems,
   binIds: tickedIds,
   onToggleBin,
@@ -85,6 +91,7 @@ export default function BreakdownScreen({
     onDrill: onNavigate,
     onUp,
     onSelectFile: onToggleBin,
+    onContextMenu: onItemMenu,
     centerSize: listOpen ? 20 : 24,
     className: STAGE_CLASS[viz],
   };
@@ -118,7 +125,17 @@ export default function BreakdownScreen({
           />
         </div>
         <div className={styles.listSlot}>
-          <ListPanel view={view} theme={theme} hoverId={hoverId} onHover={onHover} onOpen={onNavigate} binIds={binIds} onToggleBin={onToggleBin} />
+          <ListPanel
+            view={view}
+            theme={theme}
+            hoverId={hoverId}
+            onHover={onHover}
+            onOpen={onNavigate}
+            binIds={binIds}
+            onToggleBin={onToggleBin}
+            onReveal={onRevealItem}
+            onItemMenu={onItemMenu}
+          />
         </div>
         <ListToggle open={listOpen} onToggle={onToggleList} className={styles.listToggle} />
       </div>

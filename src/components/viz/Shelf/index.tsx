@@ -23,11 +23,11 @@ function focusOf(view: ViewNode, slices: Slice[], hoverId: HoverId): ViewNode | 
   return slices.find((s) => s.node?.dir)?.node ?? null;
 }
 
-export default function Shelf({ view, theme, hoverId, onHover, onDrill, onSelectFile, onDragStart, className }: VizProps) {
+export default function Shelf({ view, theme, hoverId, onHover, onDrill, onSelectFile, onDragStart, onContextMenu, className }: VizProps) {
   const slices = useMemo(() => visibleSlices(view, theme), [view, theme]);
   const related = useMemo(() => relatedKeys(view, hoverId), [view, hoverId]);
   const focus = focusOf(view, slices, hoverId);
-  const actions = { onHover, onDrill, onSelectFile };
+  const actions = { onHover, onDrill, onSelectFile, onContextMenu };
 
   return (
     <div className={cx(styles.root, className)}>

@@ -1,4 +1,4 @@
-import type { DragEvent } from "react";
+import type { DragEvent, MouseEvent } from "react";
 import type { FileEntry } from "../../lib/types";
 import { ageText } from "../../lib/age";
 import { humanBytes } from "../../lib/format";
@@ -13,6 +13,7 @@ type LargestRowProps = {
   inBin: boolean;
   onToggleBin: () => void;
   onReveal: () => void;
+  onContextMenu?: (e: MouseEvent) => void;
 };
 
 function parentPath(path: string): string {
@@ -20,13 +21,14 @@ function parentPath(path: string): string {
   return slash > 0 ? path.slice(0, slash) : "/";
 }
 
-export default function LargestRow({ entry, safe, inBin, onToggleBin, onReveal }: LargestRowProps) {
+export default function LargestRow({ entry, safe, inBin, onToggleBin, onReveal, onContextMenu }: LargestRowProps) {
   return (
     <div
       className={styles.row}
       draggable
       onDragStart={(e: DragEvent) => startBinDrag(e, entry.id)}
       onDoubleClick={onReveal}
+      onContextMenu={onContextMenu}
       title={entry.path}
     >
       <Checkbox checked={inBin} onChange={onToggleBin} aria-label={inBin ? `Remove ${entry.name} from the bin` : `Add ${entry.name} to the bin`} />

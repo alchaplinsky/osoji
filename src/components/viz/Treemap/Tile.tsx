@@ -16,6 +16,7 @@ type TileProps = {
   onMouseEnter: MouseEventHandler;
   onMouseLeave: MouseEventHandler;
   onClick: MouseEventHandler;
+  onContextMenu?: MouseEventHandler;
   draggable?: boolean;
   onDragStart?: (e: DragEvent) => void;
 };

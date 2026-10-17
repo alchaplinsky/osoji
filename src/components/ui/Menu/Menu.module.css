@@ -16,6 +16,16 @@
   animation: var(--kf-popIn) .3s var(--ease-spring);
 }
 
+/* Context menu: placed at the pointer by the component, above sheets and toasts. */
+.at {
+  position: fixed;
+  top: 0;
+  right: auto;
+  left: 0;
+  z-index: 40;
+  transform-origin: top left;
+}
+
 .item {
   display: flex;
   align-items: center;

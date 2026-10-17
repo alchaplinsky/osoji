@@ -1,3 +1,4 @@
+import type { MouseEvent } from "react";
 import { Button, Card, Mono } from "../../components/ui";
 import { humanBytes } from "../../lib/format";
 import type { Suggestion } from "../../lib/types";
@@ -8,14 +9,15 @@ type SuggestionCardProps = {
   suggestion: Suggestion;
   inBin: boolean;
   onToggle: () => void;
+  onContextMenu?: (e: MouseEvent) => void;
 };
 
 const parentPath = (path: string) => path.slice(0, path.lastIndexOf("/")) || "/";
 
-export default function SuggestionCard({ suggestion, inBin, onToggle }: SuggestionCardProps) {
+export default function SuggestionCard({ suggestion, inBin, onToggle, onContextMenu }: SuggestionCardProps) {
   const { id, name, path, size, reason, safety } = suggestion;
   return (
-    <Card className={styles.card} draggable onDragStart={(e) => startBinDrag(e, id)}>
+    <Card className={styles.card} draggable onDragStart={(e) => startBinDrag(e, id)} onContextMenu={onContextMenu}>
       <div className={styles.text}>
         <div className={styles.name}>{name}</div>
         <Mono className={styles.path}>{parentPath(path)}</Mono>

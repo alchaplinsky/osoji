@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, type MouseEvent } from "react";
 import { Button, Sheet } from "../ui";
 import { humanBytes } from "../../lib/format";
 import type { BinItem } from "../../lib/types";
@@ -15,9 +15,10 @@ type ReviewSheetProps = {
   warning?: string;
   onCancel: () => void;
   onConfirm: () => void;
+  onItemMenu?: (e: MouseEvent, item: BinItem) => void;
 };
 
-export default function ReviewSheet({ open, items, volumeName, busy, error, warning, onCancel, onConfirm }: ReviewSheetProps) {
+export default function ReviewSheet({ open, items, volumeName, busy, error, warning, onCancel, onConfirm, onItemMenu }: ReviewSheetProps) {
   const total = humanBytes(items.reduce((sum, b) => sum + b.size, 0));
   const close = useCallback(() => {
     if (!busy) onCancel();
@@ -50,7 +51,9 @@ export default function ReviewSheet({ open, items, volumeName, busy, error, warn
         </>
       }
     >
-      {items.map((item) => <ReviewRow key={item.id} item={item} />)}
+      {items.map((item) => (
+        <ReviewRow key={item.id} item={item} onContextMenu={onItemMenu && ((e) => onItemMenu(e, item))} />
+      ))}
     </Sheet>
   );
 }
