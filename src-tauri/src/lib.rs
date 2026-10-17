@@ -835,7 +835,6 @@ mod tests {
         assert_eq!(scan.arena.items[0], 0);
     }
 
-<<<<<<< HEAD
     #[test]
     fn scans_a_root_reached_through_a_symlink() {
         use std::fs;
