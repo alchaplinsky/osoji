@@ -6,7 +6,7 @@
 .card {
   display: block;
   width: 100%;
-  padding: 11px 12px 12px;
+  padding: 9px 11px 10px;
   border-radius: var(--radius-lg);
   background: var(--card2);
   border: 1px solid var(--line);
@@ -47,11 +47,11 @@
   text-overflow: ellipsis;
 }
 
-.bar { margin-top: 10px; }
+.bar { margin-top: 8px; }
 
 .meta {
   display: block;
-  margin-top: 8px;
+  margin-top: 6px;
   color: var(--fg2);
 }
 

@@ -21,19 +21,23 @@ type TileProps = {
 };
 
 const KIDS = 8;
+/** Room above the children grid for the name and size lines (9px padding + 16px + 2px + 14px, plus a 9px gap). */
+const HEAD = 50;
+/** Inset of the children grid from the tile's sides and bottom. */
+const INSET = 10;
 
 export default function Tile({ slice, cell, theme, hovered, opacity, ...handlers }: TileProps) {
   const w = cell.w - 4;
   const h = cell.h - 4;
   const node = slice.node;
   const kids =
-    node?.dir && w >= 140 && h >= 96
+    node?.dir && w >= 140 && h >= HEAD + 60
       ? squarify(
           node.children.slice(0, KIDS).map((child, j) => ({ child, j, value: child.size })),
           0,
           0,
-          w - 16,
-          h - 46,
+          w - INSET * 2,
+          h - HEAD - INSET,
         )
       : [];
 
@@ -53,7 +57,7 @@ export default function Tile({ slice, cell, theme, hovered, opacity, ...handlers
         <div
           key={k.child.id}
           className={styles.kid}
-          style={{ left: k.x + 8, top: k.y + 40, width: k.w - 3, height: k.h - 3, background: shade(theme, hueAt(k.j), 2) }}
+          style={{ left: k.x + INSET, top: k.y + HEAD, width: k.w - 3, height: k.h - 3, background: shade(theme, hueAt(k.j), 2) }}
         >
           {k.w >= 56 && k.h >= 20 && k.child.name}
         </div>

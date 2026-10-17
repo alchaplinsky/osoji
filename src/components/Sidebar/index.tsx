@@ -1,5 +1,4 @@
 import type { Screen, Volume } from "../../lib/types";
-import { Icon } from "../ui";
 import DiskCard, { type RootChoice } from "./DiskCard";
 import NavItem from "./NavItem";
 import NavSection from "./NavSection";
@@ -31,14 +30,7 @@ export default function Sidebar({ volume, scanRoot, rootPickerDisabled, onPickRo
 
   return (
     <aside className={styles.sidebar}>
-      <div className={styles.top} data-tauri-drag-region="deep">
-        <div className={styles.brand}>
-          <span className={styles.mark}>
-            <Icon name="logo" strokeWidth={1.6} />
-          </span>
-          <span className={styles.wordmark}>Unshift</span>
-        </div>
-      </div>
+      <div className={styles.top} data-tauri-drag-region="deep" />
 
       <DiskCard volume={volume} scanRoot={scanRoot} disabled={rootPickerDisabled} onPickRoot={onPickRoot} />
 

@@ -11,32 +11,10 @@
   backdrop-filter: blur(var(--blur));
 }
 
-/* Drag region; the 12px top padding is the row the native traffic lights sit in. */
-.top { padding-top: 12px; }
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 26px 6px 18px;
-  pointer-events: none;
-}
-
-.mark {
-  width: 24px;
+/* Drag region: the row the native traffic lights sit in, kept clear of content. */
+.top {
+  flex: none;
   height: 24px;
-  border-radius: var(--radius-sm);
-  background: var(--ac);
-  color: var(--acfg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.wordmark {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: -.01em;
 }
 
 .spacer { flex: 1; }
