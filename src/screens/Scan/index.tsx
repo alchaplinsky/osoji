@@ -90,8 +90,9 @@ export default function ScanScreen({ volume, rootLabel, status, progress, expect
   const found = humanBytes(progress?.bytes ?? 0);
   const unreadable = status === "done" && summary ? summary.errors : 0;
 
-  // Once the scan is complete what it found is the whole, so the ring and bar fill edge to edge.
-  const barTotal = finishing ? (progress?.bytes ?? 0) : expectedBytes;
+  // The bar is the whole disk, as in the capacity bar: segments only ever grow to the share of
+  // it the scan has found, so a finished scan rests at the used space rather than edge to edge.
+  const barTotal = volume && volume.total > 0 ? volume.total : null;
   const share = (bytes: number) => (barTotal ? Math.min(1, bytes / barTotal) : 0);
   const tops = rankedTops(progress);
   const targetFraction = finishing ? 1 : scanning ? scanFraction(progress?.bytes ?? 0, expectedBytes) : null;
@@ -113,7 +114,7 @@ export default function ScanScreen({ volume, rootLabel, status, progress, expect
             <StatTile label="Files scanned" value={humanCount(progress?.files ?? 0)} />
             <StatTile label="Found so far" value={found} />
           </div>
-          {fraction !== null && barTotal !== null && barTotal > 0 && (
+          {barTotal !== null && (
             <SegmentBar segments={segmentsOf(tops, topShares, restShare, theme)} total={1} height={8} className={styles.bar} />
           )}
           <div className={styles.path}>
