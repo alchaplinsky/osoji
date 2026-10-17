@@ -93,8 +93,9 @@ fn rule_error(src: &str) -> (String, String) {
 #[test]
 fn bundled_policies_load() {
     let macos = Policy::from_toml(MACOS).unwrap();
-    assert!(macos.rules().iter().all(|r| matches!(r.kind, Kind::Protected | Kind::Risky | Kind::Trash)));
     assert_eq!(macos.rules().iter().filter(|r| r.kind == Kind::Trash).count(), 1);
+    assert!(macos.rules().iter().all(|r| (r.kind == Kind::Cleanup) == r.safety.is_some()));
+    assert!(macos.rules().iter().any(|r| r.kind == Kind::Unexpected));
     assert!(macos.rules().iter().any(|r| r.id == "home"));
     assert!(Policy::from_toml(LINUX).unwrap().rules().is_empty());
     assert!(Policy::from_toml(WINDOWS).unwrap().rules().is_empty());
@@ -178,6 +179,12 @@ fn matches_each_field() {
     ]);
     assert_eq!(matched("suffix = \".app\", dir = false"), ["/Applications/readme.app"]);
     assert_eq!(matched("parent = \"/Applications\", not_named = [\"Utilities\", \"readme.app\"]"), ["/Applications/Safari.app"]);
+    assert_eq!(matched("prefix = \".\""), ["/Users/alex/.Trash", "/Users/alex/Documents/.Trash"]);
+    assert_eq!(matched("parent = \"/Users\", not_path = [\"~\", \"/Users/missing\"]"), Vec::<String>::new());
+    assert_eq!(matched("parent = \"~\", dir = true, not_path = [\"~/Library\", \"~/Documents\", \"~/proj\", \"~/other\"]"), [
+        "/Users/alex/.Trash",
+        "/Users/alex/Photos.photoslibrary"
+    ]);
     assert_eq!(matched("name = \"target\", sibling = \"Cargo.toml\""), ["/Users/alex/proj/target"]);
     assert_eq!(matched("parent = \"~/Documents\", min_bytes = 900"), [
         "/Users/alex/Documents/new.bin",
@@ -223,7 +230,6 @@ fn stamps_flags_and_records_the_strongest_rule() {
     let docs = flags("/Users/alex/Documents");
     assert!(docs.contains(Flags::PROTECTED | Flags::RISKY));
     assert_eq!(rule_id("/Users/alex/Documents"), Some("docs-protected"));
-    assert!(policy.rules().iter().all(|r| r.kind != Kind::Unexpected));
     assert_eq!(f.arena.count_flag(Flags::UNEXPECTED), 0);
 }
 
@@ -263,6 +269,64 @@ fn skips_home_rules_without_a_home() {
     policy.resolve(&f.arena, &f.index, &ctx).stamp(&mut f.arena);
     assert!(f.arena.flags[f.id("/System") as usize].contains(Flags::PROTECTED));
     assert!(!f.arena.flags[f.id(HOME) as usize].contains(Flags::PROTECTED));
+}
+
+#[test]
+fn fills_age_and_size_into_reasons() {
+    let f = fixture();
+    let src = rule_toml("cleanup", "name = \"a\"").replace("Because.", "{size}, untouched for {age}.");
+    let policy = Policy::from_toml(&src).unwrap();
+    let reason = |p: &str| policy.reason_for(0, &f.arena, f.id(p), &ctx());
+    assert_eq!(reason("/Users/alex/Documents/old.bin"), "900 B, untouched for 1 year.");
+    assert_eq!(reason("/Users/alex/Documents/undated.bin"), "900 B, untouched for an unknown time.");
+    assert_eq!(reason("/Users/alex/Documents"), "2.64 KB, untouched for 1 day.");
+    assert_eq!(reason::span(59), "59 days");
+    assert_eq!(reason::span(200), "6 months");
+    assert_eq!(reason::span(800), "2 years");
+    assert_eq!(reason::human_size(15 * 1024 * 1024 * 1024), "15.0 GB");
+}
+
+#[test]
+fn keeps_only_the_outermost_cleanup_matches() {
+    let f = fixture();
+    let src = rule_toml("cleanup", "parent = \"~\", not_named = [\"Library\"]")
+        + "[[rule]]\nid = \"u\"\nkind = \"cleanup\"\nreason = \"x\"\nmatch = { name = \"target\" }\n"
+        + "[[rule]]\nid = \"v\"\nkind = \"cleanup\"\nreason = \"x\"\nmatch = { under = \"/Applications\" }\n";
+    let policy = Policy::from_toml(&src).unwrap();
+    let all = policy.resolve(&f.arena, &f.index, &ctx()).cleanup_matches(&f.arena);
+    let paths = |m: Vec<(NodeId, usize)>| {
+        let mut p: Vec<String> = m.into_iter().map(|(id, _)| f.arena.path(id).to_string_lossy().into_owned()).collect();
+        p.sort();
+        p
+    };
+    let utilities = f.id("/Applications/Utilities");
+    assert_eq!(paths(covering(&f.arena, all, |id| id == utilities)), [
+        "/Applications/Safari.app",
+        "/Applications/Utilities",
+        "/Applications/readme.app",
+        "/Users/alex/.Trash",
+        "/Users/alex/Documents",
+        "/Users/alex/Photos.photoslibrary",
+        "/Users/alex/other",
+        "/Users/alex/proj",
+    ]);
+
+    let only_targets = policy.resolve(&f.arena, &f.index, &ctx()).cleanup_matches(&f.arena).into_iter().filter(|&(_, r)| r == 1).collect();
+    let proj = f.id("/Users/alex/proj");
+    assert_eq!(paths(covering(&f.arena, only_targets, |id| id == proj)), ["/Users/alex/other/target"]);
+}
+
+#[test]
+fn under_holds_for_every_node_when_the_scan_is_rooted_inside_it() {
+    let mut arena = Arena::default();
+    let root = arena.push(NONE, b"/Users/alex/proj", 0, NOW, Flags::DIR);
+    arena.push(root, b".gradle", 1, NOW, Flags::DIR);
+    arena.aggregate();
+    let index = ChildIndex::build(&arena);
+    let policy = Policy::from_toml(&rule_toml("cleanup", "under = \"~\", name = \".gradle\"")).unwrap();
+    assert_eq!(policy.resolve(&arena, &index, &ctx()).cleanup_matches(&arena), [(1, 0)]);
+    let policy = Policy::from_toml(&rule_toml("cleanup", "under = \"/Applications\", name = \".gradle\"")).unwrap();
+    assert!(policy.resolve(&arena, &index, &ctx()).cleanup_matches(&arena).is_empty());
 }
 
 /// `cargo test -p scan-policy --release -- --ignored` to time the pass at 10M nodes.

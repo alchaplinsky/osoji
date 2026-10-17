@@ -4,13 +4,14 @@
 
 mod lookup;
 mod matcher;
+mod reason;
 mod schema;
 
 pub use lookup::{expand, find_node};
-pub use matcher::{PolicyContext, PolicyHits, Resolved};
+pub use matcher::{covering, PolicyContext, PolicyHits, Resolved};
 pub use schema::{Kind, Match, PolicyError, Rule, Safety, SUPPORTED_VERSION};
 
-use scan_core::{Arena, ChildIndex};
+use scan_core::{Arena, ChildIndex, NodeId};
 
 const MACOS: &str = include_str!("../policy/macos.toml");
 const LINUX: &str = include_str!("../policy/linux.toml");
@@ -44,6 +45,11 @@ impl Policy {
 
     pub fn rule(&self, idx: usize) -> &Rule {
         &self.rules[idx]
+    }
+
+    /// A rule's reason for one node, with `{age}` and `{size}` filled in.
+    pub fn reason_for(&self, idx: usize, arena: &Arena, id: NodeId, ctx: &PolicyContext) -> String {
+        reason::fill(&self.rules[idx].reason, arena, id, ctx.now)
     }
 
     /// Bind the rules to one scan. Rules whose `path`, `parent` or `under` is not in the scan are dropped.

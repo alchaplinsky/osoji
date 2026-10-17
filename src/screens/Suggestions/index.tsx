@@ -23,6 +23,7 @@ const GROUPS: { safety: Safety; title: string; desc: string }[] = [
   { safety: "safe", title: "Safe to remove", desc: "Rebuilt automatically or already installed elsewhere" },
   { safety: "review", title: "Worth a look", desc: "Probably fine to remove, but only you can say" },
   { safety: "keep", title: "We would keep these", desc: "Personal or managed by macOS" },
+  { safety: "unexpected", title: "Worth knowing", desc: "Usually not there. Nothing to remove, just something to look at." },
 ];
 
 export default function SuggestionsScreen({
@@ -36,7 +37,7 @@ export default function SuggestionsScreen({
   onReview,
 }: SuggestionsScreenProps) {
   const bySafety = useMemo(() => {
-    const groups: Record<Safety, Suggestion[]> = { safe: [], review: [], keep: [] };
+    const groups: Record<Safety, Suggestion[]> = { safe: [], review: [], keep: [], unexpected: [] };
     for (const s of suggestions) groups[s.safety].push(s);
     return groups;
   }, [suggestions]);

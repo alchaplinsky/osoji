@@ -66,6 +66,7 @@
 .safe { background: var(--safe); }
 .review { background: var(--review); }
 .keep { background: var(--keep); }
+.unexpected { background: var(--fg3); }
 
 .groupTitle {
   font-size: 14px;

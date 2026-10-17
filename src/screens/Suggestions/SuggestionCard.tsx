@@ -34,7 +34,7 @@ export default function SuggestionCard({ suggestion, inBin, onToggle }: Suggesti
             Protected
           </Badge>
         ) : (
-          safety !== "keep" && (
+          (safety === "safe" || safety === "review") && (
             <Button size="sm" variant={inBin ? "primary" : "outline"} onClick={onToggle}>
               {inBin ? "Added" : "Add to bin"}
             </Button>

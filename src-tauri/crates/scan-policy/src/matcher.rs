@@ -1,7 +1,7 @@
 use crate::lookup::{expand, find_node};
 use crate::schema::{Kind, Rule};
 use scan_core::{Arena, ChildIndex, Flags, NodeId, NONE};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 const DAY: i64 = 86_400;
@@ -29,7 +29,9 @@ struct Compiled<'a> {
     under: Option<NodeId>,
     name: Option<&'a [u8]>,
     suffix: Option<&'a [u8]>,
+    prefix: Option<&'a [u8]>,
     not_named: &'a [String],
+    not_at: Vec<NodeId>,
     dir: Option<bool>,
     sibling: Option<&'a [u8]>,
     min_bytes: Option<u64>,
@@ -109,6 +111,15 @@ fn resolve_path(arena: &Arena, index: &ChildIndex, home: &Path, path: &Option<St
     }
 }
 
+/// Like `resolve_path`, but a scan rooted inside `under` is all under it, so the condition drops.
+fn resolve_under(arena: &Arena, index: &ChildIndex, home: &Path, under: &Option<String>) -> Result<Option<NodeId>, ()> {
+    let inside = |p: &String| !arena.is_empty() && expand(p, home).is_some_and(|p| arena.path(0).starts_with(p));
+    match resolve_path(arena, index, home, under) {
+        Err(()) if under.as_ref().is_some_and(inside) => Ok(None),
+        other => other,
+    }
+}
+
 fn compile<'a>(idx: usize, rule: &'a Rule, arena: &Arena, index: &ChildIndex, ctx: &PolicyContext) -> Option<Compiled<'a>> {
     let m = &rule.matcher;
     let at = |p| resolve_path(arena, index, &ctx.home, p).ok();
@@ -117,10 +128,18 @@ fn compile<'a>(idx: usize, rule: &'a Rule, arena: &Arena, index: &ChildIndex, ct
         kind: rule.kind,
         path: at(&m.path)?,
         parent: at(&m.parent)?,
-        under: at(&m.under)?,
+        under: resolve_under(arena, index, &ctx.home, &m.under).ok()?,
         name: m.name.as_deref().map(str::as_bytes),
         suffix: m.suffix.as_deref().map(str::as_bytes),
+        prefix: m.prefix.as_deref().map(str::as_bytes),
         not_named: &m.not_named,
+        not_at: m
+            .not_path
+            .iter()
+            .filter_map(|p| expand(p, &ctx.home))
+            .map(|p| find_node(arena, index, &p))
+            .filter(|&id| id != NONE)
+            .collect(),
         dir: m.dir,
         sibling: m.sibling.as_deref().map(str::as_bytes),
         min_bytes: m.min_bytes,
@@ -156,7 +175,10 @@ impl<'a> Resolved<'a> {
         if r.name.is_some_and(|n| n != name) || r.suffix.is_some_and(|s| !name.ends_with(s)) {
             return false;
         }
-        if r.not_named.iter().any(|n| n.as_bytes() == name) {
+        if r.prefix.is_some_and(|p| !name.starts_with(p)) {
+            return false;
+        }
+        if r.not_named.iter().any(|n| n.as_bytes() == name) || r.not_at.contains(&id) {
             return false;
         }
         if r.min_bytes.is_some_and(|m| arena.size[i] < m) {
@@ -249,6 +271,25 @@ impl<'a> Resolved<'a> {
         out.sort_unstable();
         out
     }
+}
+
+/// Drop every match that sits inside another match or inside a node `opaque` holds closed, so a
+/// suggested folder stands for everything in it.
+pub fn covering(arena: &Arena, matches: Vec<(NodeId, usize)>, opaque: impl Fn(NodeId) -> bool) -> Vec<(NodeId, usize)> {
+    let matched: HashSet<NodeId> = matches.iter().map(|&(id, _)| id).collect();
+    matches
+        .into_iter()
+        .filter(|&(id, _)| {
+            let mut p = arena.parent[id as usize];
+            while p != NONE {
+                if matched.contains(&p) || opaque(p) {
+                    return false;
+                }
+                p = arena.parent[p as usize];
+            }
+            true
+        })
+        .collect()
 }
 
 #[cfg(test)]

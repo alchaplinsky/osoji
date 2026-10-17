@@ -5,11 +5,10 @@
 mod zoom;
 
 use scan_core::{Arena, Cancel, ChildIndex, Flags, NodeId, Progress, ScanConfig, NONE};
-use scan_policy::{Kind, Policy, PolicyContext, PolicyHits};
+use scan_policy::{covering, Kind, Policy, PolicyContext, PolicyHits, Safety};
 use serde::Serialize;
-use std::borrow::Cow;
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashSet};
 use std::ffi::{CStr, CString};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -448,127 +447,6 @@ fn largest(policy: &Policy, scan: &Scan, limit: usize) -> Vec<FileEntry> {
     heap.into_sorted_vec().into_iter().map(|Reverse((_, id))| file_entry(policy, scan, id)).collect()
 }
 
-const DAY: i64 = 86_400;
-const MIB: u64 = 1024 * 1024;
-const UNDER_HOME: u8 = 1;
-const UNDER_XCODE: u8 = 2;
-const UNDER_CACHES: u8 = 4;
-
-struct Places {
-    home: NodeId,
-    xcode: NodeId,
-    caches: NodeId,
-    sim_caches: NodeId,
-    downloads: NodeId,
-    var_vm: NodeId,
-    system: NodeId,
-}
-
-const PACKAGE_CACHE: &str = "Package manager cache. Downloaded again when needed.";
-
-fn parent_named(a: &Arena, id: NodeId, name: &[u8]) -> NodeId {
-    let p = a.parent[id as usize];
-    if p != NONE && a.name(p) == name {
-        p
-    } else {
-        NONE
-    }
-}
-
-fn has_child(scan: &Scan, id: NodeId, name: &[u8]) -> bool {
-    scan.index.children(id).iter().any(|&c| scan.arena.name(c) == name)
-}
-
-fn plural(n: i64, unit: &str) -> String {
-    if n == 1 {
-        format!("1 {unit}")
-    } else {
-        format!("{n} {unit}s")
-    }
-}
-
-fn span(days: i64) -> String {
-    if days < 60 {
-        plural(days, "day")
-    } else if days < 365 {
-        plural(days / 30, "month")
-    } else {
-        plural(days / 365, "year")
-    }
-}
-
-fn is_package_cache(a: &Arena, p: &Places, id: NodeId, ctx: u8) -> bool {
-    match a.name(id) {
-        b".gradle" => ctx & UNDER_HOME != 0,
-        b".cache" => p.home != NONE && a.parent[id as usize] == p.home,
-        b"_cacache" => parent_named(a, id, b".npm") != NONE,
-        b"cache" => {
-            let reg = parent_named(a, id, b"registry");
-            let inst = parent_named(a, id, b"install");
-            (reg != NONE && parent_named(a, reg, b".cargo") != NONE)
-                || (inst != NONE && parent_named(a, inst, b".bun") != NONE)
-        }
-        _ => false,
-    }
-}
-
-fn classify(scan: &Scan, p: &Places, id: NodeId, ctx: u8, now: i64) -> Option<(&'static str, Cow<'static, str>)> {
-    let a = &scan.arena;
-    let i = id as usize;
-    let dir = a.flags[i].contains(Flags::DIR);
-    let name = a.name(id);
-    let parent = a.parent[i];
-    let rule = |safety, reason: &'static str| Some((safety, Cow::Borrowed(reason)));
-
-    if dir && name.ends_with(b".photoslibrary") {
-        return rule("keep", "Your photos. Unshift never suggests removing these.");
-    }
-    if id == p.var_vm {
-        return rule("keep", "Swap files. macOS manages these itself.");
-    }
-    if id == p.system {
-        return rule("keep", "Protected by macOS and cannot be changed.");
-    }
-    if ctx & UNDER_CACHES != 0 && (parent == p.caches || parent == p.sim_caches) {
-        return rule("safe", "App cache. Rebuilt automatically the next time the app runs.");
-    }
-    if dir {
-        if name == b"node_modules" {
-            return rule("safe", "Installed packages. Reinstalled by npm, pnpm or bun the next time you run install.");
-        }
-        if name == b"target" && parent != NONE && has_child(scan, parent, b"Cargo.toml") {
-            return rule("safe", "Rust build output. Rebuilt by cargo.");
-        }
-        if ctx & UNDER_XCODE != 0 && name == b"DerivedData" {
-            return rule("safe", "Build leftovers. Xcode recreates them the next time you open a project.");
-        }
-        if ctx & UNDER_XCODE != 0 && name == b"iOS DeviceSupport" {
-            return rule("safe", "Debug files for devices you may no longer connect. Xcode re-downloads them if needed.");
-        }
-        if is_package_cache(a, p, id, ctx) {
-            return rule("safe", PACKAGE_CACHE);
-        }
-        if name.ends_with(b".pvm") || name.ends_with(b".vmwarevm") {
-            return rule("review", "A virtual machine. Remove only if you no longer need it.");
-        }
-    }
-    if name == b"Docker.raw" {
-        return rule("review", "Docker's disk image. Prune images and containers from Docker instead of removing it.");
-    }
-    let mtime = a.mtime[i];
-    if mtime <= 0 {
-        return None;
-    }
-    let days = (now - mtime) / DAY;
-    if p.downloads != NONE && parent == p.downloads && days > 90 {
-        return Some(("review", Cow::Owned(format!("In Downloads for {}, and probably already used.", span(days)))));
-    }
-    if !dir && a.size[i] >= 500 * MIB && days > 180 {
-        return Some(("review", Cow::Owned(format!("Large file not modified in {}.", span(days)))));
-    }
-    None
-}
-
 /// Whether the current user may create or remove entries in `dir`, which moving a child to the Trash requires.
 fn is_writable(dir: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
@@ -582,79 +460,58 @@ fn is_writable(dir: &Path) -> bool {
 fn suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
     let guard = state.scan.lock().unwrap();
     let scan = guard.as_ref().ok_or("no scan loaded")?;
-    Ok(collect_suggestions(&state.policy, scan, &home_path(), unix_now()))
+    let ctx = PolicyContext { home: home_path(), now: unix_now() };
+    Ok(collect_suggestions(&state.policy, scan, &ctx))
 }
 
-fn collect_suggestions(policy: &Policy, scan: &Scan, home: &Path, now: i64) -> Vec<Suggestion> {
+const MAX_SUGGESTIONS: usize = 200;
+
+/// The outermost cleanup matches, largest first, then every unexpected finding. Nothing inside a
+/// package bundle or a trashed folder is suggested.
+fn collect_suggestions(policy: &Policy, scan: &Scan, ctx: &PolicyContext) -> Vec<Suggestion> {
     let a = &scan.arena;
     if a.is_empty() {
         return Vec::new();
     }
-    let has_home = home.is_absolute();
-    let at = |rel: &str| if has_home { find_node(scan, &home.join(rel)) } else { NONE };
-    let xcode_path = home.join("Library/Developer/Xcode");
-    let places = Places {
-        home: if has_home { find_node(scan, home) } else { NONE },
-        xcode: at("Library/Developer/Xcode"),
-        caches: at("Library/Caches"),
-        sim_caches: at("Library/Developer/CoreSimulator/Caches"),
-        downloads: at("Downloads"),
-        var_vm: find_node(scan, Path::new("/private/var/vm")),
-        system: find_node(scan, Path::new("/System")),
-    };
-    // A scan rooted inside home (or Xcode) never contains the home node itself.
-    let mut root_ctx = 0;
-    if has_home && scan.root.starts_with(home) {
-        root_ctx |= UNDER_HOME;
-    }
-    if has_home && scan.root.starts_with(&xcode_path) {
-        root_ctx |= UNDER_XCODE;
-    }
-
-    let mut found: Vec<(u64, NodeId, &'static str, Cow<'static, str>)> = Vec::new();
-    let mut stack: Vec<(NodeId, u8)> = vec![(0, root_ctx)];
-    while let Some((id, ctx)) = stack.pop() {
-        let i = id as usize;
-        let f = a.flags[i];
-        if f.intersects(GONE) {
-            continue;
-        }
-        if id != 0 {
-            if let Some((safety, reason)) = classify(scan, &places, id, ctx, now) {
-                if a.size[i] > 0 {
-                    found.push((a.size[i], id, safety, reason));
-                }
-                continue;
-            }
-            if !f.contains(Flags::DIR) || is_package(a, id) {
-                continue;
-            }
-        }
-        let mut child_ctx = ctx;
-        if id == places.home {
-            child_ctx |= UNDER_HOME;
-        }
-        if id == places.xcode {
-            child_ctx |= UNDER_XCODE;
-        }
-        if id == places.caches || id == places.sim_caches {
-            child_ctx |= UNDER_CACHES;
-        }
-        stack.extend(scan.index.children(id).iter().map(|&c| (c, child_ctx)));
-    }
-    found.sort_unstable_by(|x, y| y.0.cmp(&x.0));
-    found.truncate(200);
-    for (_, id, safety, reason) in &mut found {
-        let parent = a.parent[*id as usize];
-        if parent != NONE && !is_writable(&a.path(parent)) {
-            *safety = "keep";
-            *reason = Cow::Borrowed("Protected by macOS and cannot be moved by Unshift.");
-        }
-    }
-    found
+    let matches = policy.resolve(a, &scan.index, ctx).cleanup_matches(a);
+    let opaque = |p: NodeId| a.flags[p as usize].intersects(GONE) || (p != 0 && is_package(a, p));
+    let mut found: Vec<(NodeId, usize)> = covering(a, matches, opaque)
         .into_iter()
-        .map(|(_, id, safety, reason)| Suggestion { entry: file_entry(policy, scan, id), safety, reason: reason.into_owned() })
-        .collect()
+        .filter(|&(id, _)| id != 0 && a.size[id as usize] > 0 && !a.flags[id as usize].intersects(GONE))
+        .collect();
+    found.sort_unstable_by_key(|&(id, _)| Reverse(a.size[id as usize]));
+    found.truncate(MAX_SUGGESTIONS);
+    let mut out: Vec<Suggestion> = found
+        .into_iter()
+        .map(|(id, rule)| {
+            let entry = file_entry(policy, scan, id);
+            let parent = a.parent[id as usize];
+            let (safety, reason) = match &entry.guard {
+                Some(g) if g.kind == Kind::Protected.as_str() => ("keep", g.reason.clone()),
+                _ if parent != NONE && !is_writable(&a.path(parent)) => {
+                    ("keep", "Protected by macOS and cannot be moved by Unshift.".to_string())
+                }
+                _ => (policy.rule(rule).safety.unwrap_or(Safety::Review).as_str(), policy.reason_for(rule, a, id, ctx)),
+            };
+            Suggestion { entry, safety, reason }
+        })
+        .collect();
+
+    let listed: HashSet<NodeId> = out.iter().map(|s| s.entry.id).collect();
+    let mut unexpected: Vec<(NodeId, usize)> = scan
+        .hits
+        .iter()
+        .filter(|&(id, rule)| {
+            policy.rule(rule).kind == Kind::Unexpected && !gone_or_in_trash(a, id) && !listed.contains(&id)
+        })
+        .collect();
+    unexpected.sort_unstable_by_key(|&(id, _)| Reverse(a.size[id as usize]));
+    out.extend(unexpected.into_iter().map(|(id, rule)| Suggestion {
+        entry: file_entry(policy, scan, id),
+        safety: "unexpected",
+        reason: policy.reason_for(rule, a, id, ctx),
+    }));
+    out
 }
 
 #[derive(Serialize)]
@@ -1236,9 +1093,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    fn scan_of(root: &Path, arena: Arena) -> Scan {
+    /// Stamp `arena` with the bundled policy, as a finished scan does, and collect its suggestions.
+    fn suggest(root: &Path, mut arena: Arena, home: &Path, now: i64) -> Vec<Suggestion> {
+        let policy = Policy::for_current_os().unwrap();
         let index = ChildIndex::build(&arena);
-        Scan { root: root.to_path_buf(), arena, index, hits: PolicyHits::default(), swept: (0, 0) }
+        let ctx = PolicyContext { home: home.to_path_buf(), now };
+        let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
+        let scan = Scan { root: root.to_path_buf(), arena, index, hits, swept: (0, 0) };
+        collect_suggestions(&policy, &scan, &ctx)
     }
 
     fn by_name<'a>(found: &'a [Suggestion], name: &str) -> Option<&'a Suggestion> {
@@ -1267,9 +1129,8 @@ mod tests {
         let dyld = a.push(sim_caches, b"dyld", 0, 0, Flags::DIR);
         a.push(dyld, b"shared", 7, 0, Flags::empty());
         a.aggregate();
-        let scan = scan_of(&base, a);
 
-        let found = collect_suggestions(&Policy::default(), &scan, &home, 0);
+        let found = suggest(&base, a, &home, 0);
         std::fs::remove_dir_all(&base).unwrap();
 
         for name in ["com.example.app", "loose.db", "dyld"] {
@@ -1292,14 +1153,82 @@ mod tests {
         a.push(folders, b"tmpfile", 10, 0, Flags::empty());
         a.push(var, b"Docker.raw", 10, 0, Flags::empty());
         a.aggregate();
-        let scan = scan_of(Path::new("/"), a);
 
-        let found = collect_suggestions(&Policy::default(), &scan, Path::new("/nonexistent-home"), 0);
+        let found = suggest(Path::new("/"), a, Path::new("/nonexistent-home"), 0);
 
         assert!(by_name(&found, "folders").is_none());
         let docker = by_name(&found, "Docker.raw").expect("Docker.raw suggested");
         assert_eq!(docker.safety, "keep");
         assert_eq!(docker.reason, "Protected by macOS and cannot be moved by Unshift.");
+    }
+
+    #[test]
+    fn says_how_long_a_download_has_been_sitting_there() {
+        const NOW: i64 = 1_700_000_000;
+        let base = std::env::temp_dir().join(format!("unshift-downloads-{}", std::process::id()));
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join("Downloads")).unwrap();
+
+        let mut a = Arena::default();
+        let root = a.push(NONE, base.as_os_str().as_encoded_bytes(), 0, 0, Flags::DIR);
+        let h = a.push(root, b"home", 0, 0, Flags::DIR);
+        let downloads = a.push(h, b"Downloads", 0, 0, Flags::DIR);
+        a.push(downloads, b"old.dmg", 10, NOW - 200 * 86_400, Flags::empty());
+        a.push(downloads, b"new.dmg", 10, NOW - 10 * 86_400, Flags::empty());
+        a.aggregate();
+
+        let found = suggest(&base, a, &home, NOW);
+        std::fs::remove_dir_all(&base).unwrap();
+
+        let old = by_name(&found, "old.dmg").expect("old.dmg suggested");
+        assert_eq!(old.safety, "review");
+        assert_eq!(old.reason, "In Downloads for 6 months, and probably already used.");
+        assert!(by_name(&found, "new.dmg").is_none());
+    }
+
+    #[test]
+    fn lists_a_folder_once_and_nothing_inside_it_or_inside_a_bundle() {
+        let base = std::env::temp_dir().join(format!("unshift-nested-{}", std::process::id()));
+        std::fs::create_dir_all(base.join("app")).unwrap();
+
+        let mut a = Arena::default();
+        let root = a.push(NONE, base.as_os_str().as_encoded_bytes(), 0, 0, Flags::DIR);
+        let app = a.push(root, b"app", 0, 0, Flags::DIR);
+        let outer = a.push(app, b"node_modules", 0, 0, Flags::DIR);
+        let pkg = a.push(outer, b"pkg", 0, 0, Flags::DIR);
+        let inner = a.push(pkg, b"node_modules", 0, 0, Flags::DIR);
+        a.push(inner, b"index.js", 10, 0, Flags::empty());
+        let bundle = a.push(app, b"Tool.app", 0, 0, Flags::DIR);
+        let bundled = a.push(bundle, b"node_modules", 0, 0, Flags::DIR);
+        a.push(bundled, b"index.js", 10, 0, Flags::empty());
+        a.aggregate();
+
+        let found = suggest(&base, a, Path::new("/nonexistent-home"), 0);
+        std::fs::remove_dir_all(&base).unwrap();
+
+        let modules: Vec<&str> = found.iter().filter(|s| s.entry.name == "node_modules").map(|s| s.entry.path.as_str()).collect();
+        assert_eq!(modules, [base.join("app/node_modules").to_str().unwrap()]);
+        assert_eq!(found[0].safety, "safe");
+    }
+
+    #[test]
+    fn notes_other_users_homes_without_offering_to_remove_them() {
+        let mut a = Arena::default();
+        let root = a.push(NONE, b"/", 0, 0, Flags::DIR);
+        let users = a.push(root, b"Users", 0, 0, Flags::DIR);
+        for name in [&b"alex"[..], b"bob", b"Shared"] {
+            let home = a.push(users, name, 0, 0, Flags::DIR);
+            a.push(home, b"file", 5, 0, Flags::empty());
+        }
+        a.aggregate();
+
+        let found = suggest(Path::new("/"), a, Path::new("/Users/alex"), 0);
+
+        let bob = by_name(&found, "bob").expect("bob noted");
+        assert_eq!(bob.safety, "unexpected");
+        assert_eq!(bob.reason, "Another user account's home folder, or a leftover from one.");
+        assert!(by_name(&found, "alex").is_none());
+        assert!(by_name(&found, "Shared").is_none());
     }
 
     #[test]

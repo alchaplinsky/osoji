@@ -267,3 +267,151 @@ id = "utm-vm"
 kind = "risky"
 reason = "A virtual machine."
 match = { suffix = ".utm" }
+
+# Cleanup: what Suggestions offers. The first matching rule wins, and a match stands for everything
+# inside it. `{age}` and `{size}` in a reason are filled in per item.
+
+[[rule]]
+id = "keep-photos"
+kind = "cleanup"
+safety = "keep"
+reason = "Your photos. Unshift never suggests removing these."
+match = { suffix = ".photoslibrary", dir = true }
+
+[[rule]]
+id = "app-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "App cache. Rebuilt automatically the next time the app runs."
+match = { parent = "~/Library/Caches" }
+
+[[rule]]
+id = "simulator-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "App cache. Rebuilt automatically the next time the app runs."
+match = { parent = "~/Library/Developer/CoreSimulator/Caches" }
+
+[[rule]]
+id = "node-modules"
+kind = "cleanup"
+safety = "safe"
+reason = "Installed packages. Reinstalled by npm, pnpm or bun the next time you run install."
+match = { name = "node_modules", dir = true }
+
+[[rule]]
+id = "cargo-target"
+kind = "cleanup"
+safety = "safe"
+reason = "Rust build output. Rebuilt by cargo."
+match = { name = "target", dir = true, sibling = "Cargo.toml" }
+
+[[rule]]
+id = "xcode-derived-data"
+kind = "cleanup"
+safety = "safe"
+reason = "Build leftovers. Xcode recreates them the next time you open a project."
+match = { under = "~/Library/Developer/Xcode", name = "DerivedData", dir = true }
+
+[[rule]]
+id = "xcode-device-support"
+kind = "cleanup"
+safety = "safe"
+reason = "Debug files for devices you may no longer connect. Xcode re-downloads them if needed."
+match = { under = "~/Library/Developer/Xcode", name = "iOS DeviceSupport", dir = true }
+
+[[rule]]
+id = "gradle-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "Package manager cache. Downloaded again when needed."
+match = { under = "~", name = ".gradle", dir = true }
+
+[[rule]]
+id = "user-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "Package manager cache. Downloaded again when needed."
+match = { path = "~/.cache", dir = true }
+
+[[rule]]
+id = "npm-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "Package manager cache. Downloaded again when needed."
+match = { path = "~/.npm/_cacache", dir = true }
+
+[[rule]]
+id = "cargo-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "Package manager cache. Downloaded again when needed."
+match = { path = "~/.cargo/registry/cache", dir = true }
+
+[[rule]]
+id = "bun-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "Package manager cache. Downloaded again when needed."
+match = { path = "~/.bun/install/cache", dir = true }
+
+[[rule]]
+id = "parallels-vm-cleanup"
+kind = "cleanup"
+safety = "review"
+reason = "A virtual machine. Remove only if you no longer need it."
+match = { suffix = ".pvm", dir = true }
+
+[[rule]]
+id = "vmware-vm-cleanup"
+kind = "cleanup"
+safety = "review"
+reason = "A virtual machine. Remove only if you no longer need it."
+match = { suffix = ".vmwarevm", dir = true }
+
+[[rule]]
+id = "docker-disk"
+kind = "cleanup"
+safety = "review"
+reason = "Docker's disk image. Prune images and containers from Docker instead of removing it."
+match = { name = "Docker.raw" }
+
+[[rule]]
+id = "old-download"
+kind = "cleanup"
+safety = "review"
+reason = "In Downloads for {age}, and probably already used."
+match = { parent = "~/Downloads", older_than_days = 90 }
+
+[[rule]]
+id = "large-old-file"
+kind = "cleanup"
+safety = "review"
+reason = "Large file not modified in {age}."
+match = { dir = false, min_bytes = 524288000, older_than_days = 180 }
+
+# Unexpected: nothing to remove, just worth a look. A stronger rule on the same node wins.
+
+[[rule]]
+id = "unknown-top-level"
+kind = "unexpected"
+reason = "Not a standard macOS top-level folder. Worth checking what put it there."
+match = { parent = "/", dir = true, not_named = [
+  "Applications", "Library", "System", "Users", "Volumes", "bin", "cores", "dev", "etc", "home", "opt",
+  "private", "sbin", "tmp", "usr", "var", ".vol", ".file", ".VolumeIcon.icns", ".fseventsd",
+  ".Spotlight-V100", ".DocumentRevisions-V100", ".PKInstallSandboxManager",
+  ".PKInstallSandboxManager-SystemSoftware", ".TemporaryItems", ".Trashes", ".hotfiles.btree",
+  ".nofollow", ".resolve",
+] }
+
+[[rule]]
+id = "large-hidden-home-folder"
+kind = "unexpected"
+reason = "A hidden folder in your home that has grown large."
+match = { parent = "~", prefix = ".", dir = true, min_bytes = 5368709120, not_named = [".Trash"] }
+
+[[rule]]
+id = "other-user-home"
+kind = "unexpected"
+reason = "Another user account's home folder, or a leftover from one."
+match = { parent = "/Users", dir = true, not_named = ["Shared", "Guest"], not_path = ["~"] }

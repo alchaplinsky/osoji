@@ -45,7 +45,7 @@ impl Safety {
 }
 
 /// Conditions a node must meet for a rule to apply. Every field that is set must hold.
-/// `path`, `parent` and `under` are absolute, or start with `~` for the home folder.
+/// `path`, `parent`, `under` and `not_path` are absolute, or start with `~` for the home folder.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Match {
@@ -54,8 +54,11 @@ pub struct Match {
     pub under: Option<String>,
     pub name: Option<String>,
     pub suffix: Option<String>,
+    pub prefix: Option<String>,
     #[serde(default)]
     pub not_named: Vec<String>,
+    #[serde(default)]
+    pub not_path: Vec<String>,
     pub dir: Option<bool>,
     pub sibling: Option<String>,
     pub min_bytes: Option<u64>,
@@ -71,6 +74,7 @@ impl Match {
         [("path", &self.path), ("parent", &self.parent), ("under", &self.under)]
             .into_iter()
             .filter_map(|(field, value)| value.as_ref().map(|v| (field, v)))
+            .chain(self.not_path.iter().map(|v| ("not_path", v)))
     }
 }
 
