@@ -184,6 +184,14 @@ fn find_node(scan: &Scan, path: &Path) -> NodeId {
     id
 }
 
+/// The walker refuses symlinks anywhere in a path, so scan the real path; and fail loudly on an
+/// unreadable root instead of returning an empty scan.
+fn resolve_root(root: &str) -> Result<PathBuf, String> {
+    let path = std::fs::canonicalize(root).map_err(|e| format!("Can't open {root}: {e}"))?;
+    std::fs::read_dir(&path).map_err(|e| format!("Can't read {root}: {e}"))?;
+    Ok(path)
+}
+
 #[tauri::command]
 async fn start_scan(
     state: State<'_, AppState>,
@@ -194,11 +202,18 @@ async fn start_scan(
     if state.running.swap(true, Ordering::AcqRel) {
         return Err("a scan is already running".into());
     }
+    let canonical = match resolve_root(&root) {
+        Ok(p) => p,
+        Err(e) => {
+            state.running.store(false, Ordering::Release);
+            return Err(e);
+        }
+    };
     let cancel = Arc::new(AtomicBool::new(false));
     *state.cancel.lock().unwrap() = Some(cancel.clone());
 
     let cfg = ScanConfig {
-        root: PathBuf::from(&root),
+        root: canonical,
         threads: threads.unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8)),
         cross_mounts: false,
         qos: true,
@@ -499,6 +514,7 @@ fn suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
         return Ok(Vec::new());
     }
     let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
+    let home = std::fs::canonicalize(&home).unwrap_or(home);
     let has_home = home.is_absolute();
     let at = |rel: &str| if has_home { find_node(scan, &home.join(rel)) } else { NONE };
     let xcode_path = home.join("Library/Developer/Xcode");
@@ -587,7 +603,8 @@ fn watch_status(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<Wa
     Ok(paths
         .into_iter()
         .map(|path| {
-            let id = find_node(scan, Path::new(&path));
+            // The scan root is canonical; a path that no longer resolves is gone.
+            let id = std::fs::canonicalize(&path).map_or(NONE, |p| find_node(scan, &p));
             if id == NONE || in_trash(a, id) {
                 return WatchHit { path, id: None, size: 0, dir: false };
             }
@@ -765,5 +782,48 @@ mod tests {
         assert!(in_trash(&scan.arena, file));
         assert_eq!(scan.arena.size[0], 0);
         assert_eq!(scan.arena.items[0], 0);
+    }
+
+    #[test]
+    fn scans_a_root_reached_through_a_symlink() {
+        use std::fs;
+        // Not canonicalized: on macOS the temp dir itself sits under the /var symlink.
+        let base = std::env::temp_dir().join(format!("unshift-symroot-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(base.join("real/sub")).unwrap();
+        fs::write(base.join("real/sub/f"), [0u8; 4096]).unwrap();
+        std::os::unix::fs::symlink(base.join("real"), base.join("link")).unwrap();
+        let link = base.join("link");
+
+        let root = resolve_root(link.to_str().unwrap()).unwrap();
+        assert_eq!(root, fs::canonicalize(base.join("real")).unwrap());
+        let cfg = ScanConfig { root: root.clone(), threads: 2, cross_mounts: false, qos: false };
+        let arena = scan_macos::walk(&cfg, &Progress::default(), &Cancel::new(false)).unwrap();
+        let index = ChildIndex::build(&arena);
+        let scan = Scan { root, arena, index };
+
+        let f = find_node(&scan, &fs::canonicalize(link.join("sub/f")).unwrap());
+        assert_ne!(f, NONE);
+        assert_eq!(scan.arena.name(f), b"f");
+        assert!(!scan.arena.flags[0].contains(Flags::ERROR));
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn rejects_missing_or_unreadable_roots() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("unshift-badroot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+
+        let missing = base.join("missing");
+        let err = resolve_root(missing.to_str().unwrap()).unwrap_err();
+        assert!(err.starts_with(&format!("Can't open {}", missing.display())), "{err}");
+
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let err = resolve_root(base.to_str().unwrap()).unwrap_err();
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(err.starts_with(&format!("Can't read {}", base.display())), "{err}");
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
