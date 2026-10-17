@@ -13,7 +13,7 @@ export default function HoverLabel({ target, hint }: HoverLabelProps) {
           <span className={styles.hoverSwatch} style={{ background: target.fill }} />
           <span className={styles.hoverName}>{target.name}</span>
           <Mono className={styles.hoverMeta}>
-            {humanBytes(target.size)} · {target.pct.toFixed(target.pct < 10 ? 1 : 0)}%
+            {humanBytes(target.size)} · {target.pct.toFixed(target.pct < 10 ? 1 : 0)}%{target.error && " · Can't read"}
           </Mono>
         </>
       ) : (

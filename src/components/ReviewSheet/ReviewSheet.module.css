@@ -68,6 +68,15 @@
   animation: slide 1.2s linear infinite;
 }
 
+.progressLabel {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--fg2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 @keyframes slide {
   from { transform: translateX(-100%); }
   to { transform: translateX(250%); }

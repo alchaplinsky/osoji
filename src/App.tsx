@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import Sidebar from "./components/Sidebar";
 import ReviewSheet from "./components/ReviewSheet";
+import FdaBanner from "./components/FdaBanner";
 import { Toast } from "./components/ui";
 import ScanScreen, { SCAN_SETTLE_MS } from "./screens/Scan";
 import BreakdownScreen from "./screens/Breakdown";
@@ -16,7 +17,10 @@ import { useWatchers } from "./hooks/useWatchers";
 import { useBin } from "./hooks/useBin";
 import { useTheme } from "./hooks/useTheme";
 import { useSettings } from "./hooks/useSettings";
+import { useFullDiskAccess } from "./hooks/useFullDiskAccess";
+import { useShortcuts } from "./hooks/useShortcuts";
 import { homeDir, nodeInfo, reveal, trashNodes, volumeInfo } from "./lib/api";
+import type { TrashProgress } from "./lib/api";
 import { humanBytes } from "./lib/format";
 import { reviewWarning } from "./lib/bin";
 import { expectedBytes } from "./lib/scanEstimate";
@@ -35,6 +39,7 @@ export default function App() {
   const watchers = useWatchers();
   const bin = useBin();
   const { theme } = useTheme();
+  const fda = useFullDiskAccess();
   const { confirmBig, watchers: watchersOn } = useSettings();
   const [screen, setScreen] = useState<Screen>("scan");
   const [viz, setViz] = useState<Viz>("sunburst");
@@ -48,6 +53,7 @@ export default function App() {
   const [review, setReview] = useState(false);
   const [sweeping, setSweeping] = useState(false);
   const [sweepError, setSweepError] = useState<string | null>(null);
+  const [sweepProgress, setSweepProgress] = useState<TrashProgress | null>(null);
   const [toast, setToast] = useState<{ title: string; sub: string } | null>(null);
   const toastTimer = useRef<number>();
 
@@ -123,6 +129,8 @@ export default function App() {
         ? "~" + scanRoot.slice(home.length)
         : scanRoot;
   const scanned = scan.status === "done" && explorer.view !== null;
+  const unreadable = scan.summary?.errors ?? 0;
+  const askForAccess = unreadable > 0 && fda.granted === false && !fda.dismissed;
 
   const startScan = () => {
     setScreen("scan");
@@ -169,7 +177,7 @@ export default function App() {
     setSweeping(true);
     setSweepError(null);
     try {
-      const result = await trashNodes(bin.items.map((i) => i.id));
+      const result = await trashNodes(bin.items.map((i) => i.id), setSweepProgress);
       const here = [explorer.currentId, ...(explorer.info?.ancestors.map((a) => a.id) ?? [])];
       const moved = new Set(result.trashed);
       const trashedHere = bin.items.find((i) => moved.has(i.id) && here.includes(i.id));
@@ -187,6 +195,7 @@ export default function App() {
       setSweepError(String(e));
     } finally {
       setSweeping(false);
+      setSweepProgress(null);
     }
   };
 
@@ -210,6 +219,18 @@ export default function App() {
 
   const canShow = (s: Screen) => s === "scan" || s === "settings" || (s === "watchers" ? watchersOn && scanned : scanned);
   const active = canShow(screen) ? screen : "scan";
+
+  useShortcuts(
+    {
+      "Meta+r": () => {
+        if (scan.status !== "scanning" && !sweeping) startScan();
+      },
+      "Meta+Enter": () => {
+        if (active === "breakdown") reveal(explorer.currentId).catch(console.error);
+      },
+    },
+    !review,
+  );
 
   const binProps = {
     binItems: bin.items,
@@ -270,6 +291,7 @@ export default function App() {
             onRescan={startScan}
             onReveal={() => reveal(explorer.currentId).catch(console.error)}
             onToggleBin={toggleBinById}
+            banner={askForAccess && <FdaBanner unreadable={unreadable} onOpenSettings={fda.openSettings} onDismiss={fda.dismiss} />}
             {...binProps}
           />
         )}
@@ -310,6 +332,7 @@ export default function App() {
         items={bin.items}
         volumeName={volume?.name ?? "this disk"}
         busy={sweeping}
+        progress={sweepProgress}
         error={sweepError}
         warning={warning}
         onCancel={() => {

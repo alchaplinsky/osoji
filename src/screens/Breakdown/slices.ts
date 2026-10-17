@@ -12,12 +12,14 @@ export type Slice = {
   size: number;
   fill: string;
   guard: Guard | null;
+  /** The folder could not be read, so its size is incomplete. */
+  error: boolean;
 };
 
 export function slicesOf(view: ViewNode, theme: ThemeName): Slice[] {
-  const slices: Slice[] = view.children.map((n, i) => ({ node: n, key: n.id, hover: n.id, name: n.name, size: n.size, fill: tone(theme, i), guard: n.guard ?? null }));
+  const slices: Slice[] = view.children.map((n, i) => ({ node: n, key: n.id, hover: n.id, name: n.name, size: n.size, fill: tone(theme, i), guard: n.guard ?? null, error: n.error }));
   if (view.other > 0) {
-    slices.push({ node: null, key: otherKey(view.id), hover: "other", name: `${view.other_count} smaller items`, size: view.other, fill: neutral(theme), guard: null });
+    slices.push({ node: null, key: otherKey(view.id), hover: "other", name: `${view.other_count} smaller items`, size: view.other, fill: neutral(theme), guard: null, error: false });
   }
   return slices;
 }
@@ -32,14 +34,14 @@ export function visibleSlices(view: ViewNode, theme: ThemeName, max = 14, minSha
   let restCount = view.other_count;
   view.children.forEach((n, i) => {
     if (i < max && view.size > 0 && n.size / view.size >= minShare) {
-      slices.push({ node: n, key: n.id, hover: n.id, name: n.name, size: n.size, fill: tone(theme, i), guard: n.guard ?? null });
+      slices.push({ node: n, key: n.id, hover: n.id, name: n.name, size: n.size, fill: tone(theme, i), guard: n.guard ?? null, error: n.error });
     } else {
       restSize += n.size;
       restCount += 1;
     }
   });
   if (restSize > 0) {
-    slices.push({ node: null, key: otherKey(view.id), hover: "other", name: `${restCount} smaller items`, size: restSize, fill: neutral(theme), guard: null });
+    slices.push({ node: null, key: otherKey(view.id), hover: "other", name: `${restCount} smaller items`, size: restSize, fill: neutral(theme), guard: null, error: false });
   }
   return slices;
 }

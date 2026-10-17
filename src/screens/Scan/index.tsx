@@ -38,6 +38,8 @@ function titleFor(status: ScanStatus, rootLabel: string) {
       return `Scanning ${rootLabel}`;
     case "done":
       return "Scan again?";
+    case "stopped":
+      return "Scan stopped";
     case "error":
       return "Scan failed";
     default:
@@ -54,6 +56,8 @@ function subFor(status: ScanStatus, summary: ScanSummary | null, error: string |
       if (!summary) return tail;
       return `${humanCount(summary.entries)} items · ${humanBytes(summary.bytes)} in ${humanDuration(summary.elapsed_ms)}. ${tail}`;
     }
+    case "stopped":
+      return "Nothing was kept from the stopped scan. Start again to see the breakdown.";
     case "error":
       return error ?? "Something went wrong while scanning.";
     default:
@@ -129,7 +133,7 @@ export default function ScanScreen({ volume, rootLabel, status, progress, expect
           <Button variant="primary" size="xl" className={styles.start} onClick={onStart}>
             Scan {rootLabel}
           </Button>
-          <div className={styles.note}>{status === "done" ? "Last scan: just now" : "No scan yet"}</div>
+          <div className={styles.note}>{status === "done" ? "Last scan: just now" : status === "stopped" ? "Last scan: stopped" : "No scan yet"}</div>
           {unreadable > 0 && (
             <div className={styles.warn}>
               {humanCount(unreadable)} {unreadable === 1 ? "folder" : "folders"} could not be read. Grant Full Disk Access to include them.

@@ -12,7 +12,7 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::ffi::{CStr, CString};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
@@ -31,6 +31,9 @@ struct AppState {
     cancel: Mutex<Option<Arc<Cancel>>>,
     running: AtomicBool,
     policy: Policy,
+    /// Bumped each time `scan` is replaced, so a sweep can tell its arena went stale.
+    generation: AtomicU64,
+    sweeping: AtomicBool,
 }
 
 /// Why the UI should treat a node with care: "protected", "risky" or "unexpected".
@@ -122,6 +125,15 @@ struct TrashResult {
     failed: Vec<String>,
 }
 
+#[derive(Serialize, Clone)]
+struct TrashProgress {
+    done: usize,
+    total: usize,
+    bytes: u64,
+    /// Name of the item being moved.
+    current: String,
+}
+
 #[derive(Serialize)]
 struct FileEntry {
     id: NodeId,
@@ -209,6 +221,14 @@ fn find_node(scan: &Scan, path: &Path) -> NodeId {
     id
 }
 
+/// The walker refuses symlinks anywhere in a path, so scan the real path; and fail loudly on an
+/// unreadable root instead of returning an empty scan.
+fn resolve_root(root: &str) -> Result<PathBuf, String> {
+    let path = std::fs::canonicalize(root).map_err(|e| format!("Can't open {root}: {e}"))?;
+    std::fs::read_dir(&path).map_err(|e| format!("Can't read {root}: {e}"))?;
+    Ok(path)
+}
+
 #[tauri::command]
 async fn start_scan(
     state: State<'_, AppState>,
@@ -216,14 +236,24 @@ async fn start_scan(
     threads: Option<usize>,
     on_progress: Channel<ProgressMsg>,
 ) -> Result<ScanSummary, String> {
+    if state.sweeping.load(Ordering::Acquire) {
+        return Err("wait for the sweep to finish".into());
+    }
     if state.running.swap(true, Ordering::AcqRel) {
         return Err("a scan is already running".into());
     }
+    let canonical = match resolve_root(&root) {
+        Ok(p) => p,
+        Err(e) => {
+            state.running.store(false, Ordering::Release);
+            return Err(e);
+        }
+    };
     let cancel = Arc::new(AtomicBool::new(false));
     *state.cancel.lock().unwrap() = Some(cancel.clone());
 
     let cfg = ScanConfig {
-        root: PathBuf::from(&root),
+        root: canonical,
         threads: threads.unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8)),
         cross_mounts: false,
         qos: true,
@@ -262,23 +292,32 @@ async fn start_scan(
 
     let result = task.map_err(|e| e.to_string())?;
     let mut arena = result.map_err(|e| e.to_string())?;
-    let index = ChildIndex::build(&arena);
-    let ctx = PolicyContext { home: home_path(), now: unix_now() };
-    let hits = state.policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
+    let cancelled = cancel.load(Ordering::Relaxed);
     let summary = ScanSummary {
         root: root.clone(),
         entries: arena.len(),
         bytes: arena.size[0],
         errors: progress.errors.load(Ordering::Relaxed),
         elapsed_ms: t0.elapsed().as_millis() as u64,
-        cancelled: cancel.load(Ordering::Relaxed),
+        cancelled,
     };
-    *state.scan.lock().unwrap() = Some(Scan { root: cfg.root, arena, index, hits });
+    // A stopped walk leaves every unfinished directory under-counted, so it never replaces the
+    // last complete scan.
+    if !cancelled {
+        let index = ChildIndex::build(&arena);
+        let ctx = PolicyContext { home: home_path(), now: unix_now() };
+        let hits = state.policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
+        let mut slot = state.scan.lock().unwrap();
+        *slot = Some(Scan { root: cfg.root, arena, index, hits });
+        state.generation.fetch_add(1, Ordering::AcqRel);
+    }
     Ok(summary)
 }
 
+/// Canonical, because `Scan.root` is canonical and a home reached through a symlink must still match.
 fn home_path() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_default())
+    let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
+    std::fs::canonicalize(&home).unwrap_or(home)
 }
 
 fn unix_now() -> i64 {
@@ -406,6 +445,7 @@ const DAY: i64 = 86_400;
 const MIB: u64 = 1024 * 1024;
 const UNDER_HOME: u8 = 1;
 const UNDER_XCODE: u8 = 2;
+const UNDER_CACHES: u8 = 4;
 
 struct Places {
     home: NodeId,
@@ -413,7 +453,6 @@ struct Places {
     caches: NodeId,
     sim_caches: NodeId,
     downloads: NodeId,
-    var_folders: NodeId,
     var_vm: NodeId,
     system: NodeId,
 }
@@ -483,6 +522,9 @@ fn classify(scan: &Scan, p: &Places, id: NodeId, ctx: u8, now: i64) -> Option<(&
     if id == p.system {
         return rule("keep", "Protected by macOS and cannot be changed.");
     }
+    if ctx & UNDER_CACHES != 0 && (parent == p.caches || parent == p.sim_caches) {
+        return rule("safe", "App cache. Rebuilt automatically the next time the app runs.");
+    }
     if dir {
         if name == b"node_modules" {
             return rule("safe", "Installed packages. Reinstalled by npm, pnpm or bun the next time you run install.");
@@ -496,17 +538,8 @@ fn classify(scan: &Scan, p: &Places, id: NodeId, ctx: u8, now: i64) -> Option<(&
         if ctx & UNDER_XCODE != 0 && name == b"iOS DeviceSupport" {
             return rule("safe", "Debug files for devices you may no longer connect. Xcode re-downloads them if needed.");
         }
-        if id == p.caches {
-            return rule("safe", "Apps rebuild their caches automatically. They may open a little slower the first time after.");
-        }
-        if id == p.sim_caches {
-            return rule("safe", "Simulator caches. Rebuilt on demand.");
-        }
         if is_package_cache(a, p, id, ctx) {
             return rule("safe", PACKAGE_CACHE);
-        }
-        if id == p.var_folders {
-            return rule("safe", "Temporary files macOS clears on restart.");
         }
         if name.ends_with(b".pvm") || name.ends_with(b".vmwarevm") {
             return rule("review", "A virtual machine. Remove only if you no longer need it.");
@@ -529,38 +562,47 @@ fn classify(scan: &Scan, p: &Places, id: NodeId, ctx: u8, now: i64) -> Option<(&
     None
 }
 
+/// Whether the current user may create or remove entries in `dir`, which moving a child to the Trash requires.
+fn is_writable(dir: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c) = CString::new(dir.as_os_str().as_bytes()) else {
+        return false;
+    };
+    unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
+}
+
 #[tauri::command]
 fn suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
     let guard = state.scan.lock().unwrap();
     let scan = guard.as_ref().ok_or("no scan loaded")?;
+    Ok(collect_suggestions(&state.policy, scan, &home_path(), unix_now()))
+}
+
+fn collect_suggestions(policy: &Policy, scan: &Scan, home: &Path, now: i64) -> Vec<Suggestion> {
     let a = &scan.arena;
     if a.is_empty() {
-        return Ok(Vec::new());
+        return Vec::new();
     }
-    let home = home_path();
     let has_home = home.is_absolute();
     let at = |rel: &str| if has_home { find_node(scan, &home.join(rel)) } else { NONE };
     let xcode_path = home.join("Library/Developer/Xcode");
-    let from_slash = scan.root == Path::new("/");
     let places = Places {
-        home: if has_home { find_node(scan, &home) } else { NONE },
+        home: if has_home { find_node(scan, home) } else { NONE },
         xcode: at("Library/Developer/Xcode"),
         caches: at("Library/Caches"),
         sim_caches: at("Library/Developer/CoreSimulator/Caches"),
         downloads: at("Downloads"),
-        var_folders: if from_slash { find_node(scan, Path::new("/private/var/folders")) } else { NONE },
         var_vm: find_node(scan, Path::new("/private/var/vm")),
         system: find_node(scan, Path::new("/System")),
     };
     // A scan rooted inside home (or Xcode) never contains the home node itself.
     let mut root_ctx = 0;
-    if has_home && scan.root.starts_with(&home) {
+    if has_home && scan.root.starts_with(home) {
         root_ctx |= UNDER_HOME;
     }
     if has_home && scan.root.starts_with(&xcode_path) {
         root_ctx |= UNDER_XCODE;
     }
-    let now = unix_now();
 
     let mut found: Vec<(u64, NodeId, &'static str, Cow<'static, str>)> = Vec::new();
     let mut stack: Vec<(NodeId, u8)> = vec![(0, root_ctx)];
@@ -588,14 +630,24 @@ fn suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
         if id == places.xcode {
             child_ctx |= UNDER_XCODE;
         }
+        if id == places.caches || id == places.sim_caches {
+            child_ctx |= UNDER_CACHES;
+        }
         stack.extend(scan.index.children(id).iter().map(|&c| (c, child_ctx)));
     }
     found.sort_unstable_by(|x, y| y.0.cmp(&x.0));
     found.truncate(200);
-    Ok(found
+    for (_, id, safety, reason) in &mut found {
+        let parent = a.parent[*id as usize];
+        if parent != NONE && !is_writable(&a.path(parent)) {
+            *safety = "keep";
+            *reason = Cow::Borrowed("Protected by macOS and cannot be moved by Unshift.");
+        }
+    }
+    found
         .into_iter()
-        .map(|(_, id, safety, reason)| Suggestion { entry: file_entry(&state.policy, scan, id), safety, reason: reason.into_owned() })
-        .collect())
+        .map(|(_, id, safety, reason)| Suggestion { entry: file_entry(policy, scan, id), safety, reason: reason.into_owned() })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -624,7 +676,8 @@ fn watch_status(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<Wa
     Ok(paths
         .into_iter()
         .map(|path| {
-            let id = find_node(scan, Path::new(&path));
+            // The scan root is canonical; a path that no longer resolves is gone.
+            let id = std::fs::canonicalize(&path).map_or(NONE, |p| find_node(scan, &p));
             if id == NONE || in_trash(a, id) {
                 return WatchHit { path, id: None, size: 0, dir: false };
             }
@@ -679,16 +732,14 @@ fn protection(policy: &Policy, scan: &Scan, id: NodeId) -> Option<String> {
     Some(format!("{}: protected. It contains {}. {}", a.path(id).display(), a.path(inner).display(), reason(inner)))
 }
 
-/// Move `nodes` to the Trash through `delete`, skipping protected ones, and update the tree.
-fn sweep(
-    policy: &Policy,
-    scan: &mut Scan,
-    nodes: Vec<NodeId>,
-    mut delete: impl FnMut(&Path) -> Result<(), String>,
-) -> Result<TrashResult, String> {
-    let mut bytes = 0u64;
-    let mut trashed = Vec::new();
-    let mut failed = Vec::new();
+/// One node a sweep will move: id, path, display name and size before the move.
+type SweepItem = (NodeId, PathBuf, String, u64);
+
+/// Decide which of `nodes` may go to the Trash. Protected nodes are refused with a reason, unknown
+/// and already trashed ids are skipped. Pure, so the guard is testable without Tauri.
+fn plan_sweep(policy: &Policy, scan: &Scan, nodes: Vec<NodeId>) -> Result<(Vec<SweepItem>, Vec<String>), String> {
+    let mut items = Vec::new();
+    let mut refused = Vec::new();
     for id in nodes {
         if (id as usize) >= scan.arena.len() || id == 0 {
             continue;
@@ -701,30 +752,87 @@ fn sweep(
             return Err(format!("refusing to trash {} outside the scan root", path.display()));
         }
         if let Some(refusal) = protection(policy, scan, id) {
-            failed.push(refusal);
+            refused.push(refusal);
             continue;
         }
-        if let Err(e) = delete(&path) {
-            failed.push(format!("{}: {e}", path.display()));
+        items.push((id, path, name_of(&scan.arena, id), scan.arena.size[id as usize]));
+    }
+    Ok((items, refused))
+}
+
+/// Fold the delete outcomes into the tree. `live` is None when another scan replaced the arena
+/// meanwhile: the items are still reported as moved, but nothing is marked.
+fn finish_sweep(mut live: Option<&mut Scan>, outcomes: Vec<(NodeId, u64, Result<(), String>)>, mut failed: Vec<String>) -> TrashResult {
+    let mut bytes = 0u64;
+    let mut trashed = Vec::new();
+    for (id, size, outcome) in outcomes {
+        if let Err(e) = outcome {
+            failed.push(e);
             continue;
         }
-        bytes += scan.arena.mark_trashed(id);
         trashed.push(id);
-        let parent = scan.arena.parent[id as usize];
-        let mut p = parent;
+        let Some(scan) = live.as_deref_mut() else {
+            bytes += size;
+            continue;
+        };
+        bytes += scan.arena.mark_trashed(id);
+        let mut p = scan.arena.parent[id as usize];
         while p != NONE {
             scan.index.resort(&scan.arena, p);
             p = scan.arena.parent[p as usize];
         }
     }
-    Ok(TrashResult { bytes, count: trashed.len(), trashed, failed })
+    TrashResult { bytes, count: trashed.len(), trashed, failed }
 }
 
 #[tauri::command]
-fn trash_nodes(state: State<'_, AppState>, nodes: Vec<NodeId>) -> Result<TrashResult, String> {
+async fn trash_nodes(
+    state: State<'_, AppState>,
+    nodes: Vec<NodeId>,
+    on_progress: Channel<TrashProgress>,
+) -> Result<TrashResult, String> {
+    if state.sweeping.swap(true, Ordering::AcqRel) {
+        return Err("a sweep is already running".into());
+    }
+    let result = sweep(&state, nodes, on_progress).await;
+    state.sweeping.store(false, Ordering::Release);
+    result
+}
+
+/// Moves nodes to the Trash without holding the scan lock during the slow part:
+/// validate under the lock, delete off the main thread, then re-lock to mark.
+async fn sweep(state: &AppState, nodes: Vec<NodeId>, on_progress: Channel<TrashProgress>) -> Result<TrashResult, String> {
+    let (generation, items, refused) = {
+        let guard = state.scan.lock().unwrap();
+        let scan = guard.as_ref().ok_or("no scan loaded")?;
+        let (items, refused) = plan_sweep(&state.policy, scan, nodes)?;
+        (state.generation.load(Ordering::Acquire), items, refused)
+    };
+
+    let total = items.len();
+    let outcomes = tauri::async_runtime::spawn_blocking(move || {
+        let mut bytes = 0u64;
+        let mut current = String::new();
+        let mut outcomes = Vec::with_capacity(total);
+        for (done, (id, path, name, size)) in items.into_iter().enumerate() {
+            current = name;
+            let _ = on_progress.send(TrashProgress { done, total, bytes, current: current.clone() });
+            let outcome = trash::delete(&path).map_err(|e| format!("{}: {e}", path.display()));
+            if outcome.is_ok() {
+                bytes += size;
+            }
+            outcomes.push((id, size, outcome));
+        }
+        let _ = on_progress.send(TrashProgress { done: total, total, bytes, current });
+        outcomes
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
     let mut guard = state.scan.lock().unwrap();
-    let scan = guard.as_mut().ok_or("no scan loaded")?;
-    sweep(&state.policy, scan, nodes, |path| trash::delete(path).map_err(|e| e.to_string()))
+    // A scan that finished meanwhile replaced the arena: the ids no longer point at what was deleted.
+    let live = guard.as_mut().filter(|_| state.generation.load(Ordering::Acquire) == generation);
+    Ok(finish_sweep(live, outcomes, refused))
 }
 
 #[tauri::command]
@@ -773,6 +881,34 @@ fn volume_name(mount: &str) -> String {
     })
 }
 
+/// Folders under `$HOME` that macOS only lets an app list once it has Full Disk Access.
+const TCC_PROBES: [&str; 3] = ["Library/Mail", "Library/Safari", "Library/Messages"];
+const PRIVACY_ALL_FILES_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
+
+/// Granted when any protected folder that exists can be listed; with none present there is nothing to block.
+#[tauri::command]
+fn full_disk_access() -> bool {
+    let home = PathBuf::from(home_dir());
+    let mut denied = false;
+    for dir in TCC_PROBES.map(|p| home.join(p)) {
+        match std::fs::read_dir(&dir) {
+            Ok(_) => return true,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => denied = true,
+            Err(_) => {}
+        }
+    }
+    !denied
+}
+
+#[tauri::command]
+fn open_privacy_settings() -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg(PRIVACY_ALL_FILES_URL)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 pub fn run() {
     scan_macos::disable_dataless_materialization();
     scan_macos::raise_fd_limit();
@@ -805,7 +941,9 @@ pub fn run() {
             reveal,
             trash_nodes,
             home_dir,
-            volume_info
+            volume_info,
+            full_disk_access,
+            open_privacy_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -885,25 +1023,134 @@ mod tests {
         assert_eq!(guard_of(&policy, &scan, loose), Some(Guard { kind: "risky", reason: "Big file.".into() }));
         assert_eq!(guard_of(&policy, &scan, inner), None);
 
-        let mut deleted = Vec::new();
-        let result = sweep(&policy, &mut scan, vec![keep, boxed, loose, inner], |p| {
-            deleted.push(p.to_path_buf());
-            Ok(())
-        })
-        .unwrap();
-
-        assert_eq!(result.trashed, vec![loose, inner]);
-        assert_eq!(result.bytes, 10);
+        let (items, refused) = plan_sweep(&policy, &scan, vec![keep, boxed, loose, inner]).unwrap();
+        let paths: Vec<PathBuf> = items.iter().map(|(_, p, _, _)| p.clone()).collect();
+        assert_eq!(paths, vec![PathBuf::from("/tmp/root/loose.bin"), PathBuf::from("/tmp/root/keep/inner.bin")]);
         assert_eq!(
-            result.failed,
+            refused,
             vec![
                 "/tmp/root/keep: protected. Keep it.".to_string(),
                 "/tmp/root/box: protected. It contains /tmp/root/box/.vault. A vault.".to_string(),
             ]
         );
-        assert_eq!(deleted, vec![PathBuf::from("/tmp/root/loose.bin"), PathBuf::from("/tmp/root/keep/inner.bin")]);
+
+        let outcomes = items.into_iter().map(|(id, _, _, size)| (id, size, Ok(()))).collect();
+        let result = finish_sweep(Some(&mut scan), outcomes, refused.clone());
+
+        assert_eq!(result.trashed, vec![loose, inner]);
+        assert_eq!(result.bytes, 10);
+        assert_eq!(result.failed, refused);
         assert!(!scan.arena.flags[keep as usize].contains(Flags::TRASHED));
         assert!(!scan.arena.flags[boxed as usize].contains(Flags::TRASHED));
         assert!(scan.arena.flags[loose as usize].contains(Flags::TRASHED));
+    }
+
+    #[test]
+    fn scans_a_root_reached_through_a_symlink() {
+        use std::fs;
+        // Not canonicalized: on macOS the temp dir itself sits under the /var symlink.
+        let base = std::env::temp_dir().join(format!("unshift-symroot-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(base.join("real/sub")).unwrap();
+        fs::write(base.join("real/sub/f"), [0u8; 4096]).unwrap();
+        std::os::unix::fs::symlink(base.join("real"), base.join("link")).unwrap();
+        let link = base.join("link");
+
+        let root = resolve_root(link.to_str().unwrap()).unwrap();
+        assert_eq!(root, fs::canonicalize(base.join("real")).unwrap());
+        let cfg = ScanConfig { root: root.clone(), threads: 2, cross_mounts: false, qos: false };
+        let arena = scan_macos::walk(&cfg, &Progress::default(), &Cancel::new(false)).unwrap();
+        let index = ChildIndex::build(&arena);
+        let scan = Scan { root, arena, index, hits: PolicyHits::default() };
+
+        let f = find_node(&scan, &fs::canonicalize(link.join("sub/f")).unwrap());
+        assert_ne!(f, NONE);
+        assert_eq!(scan.arena.name(f), b"f");
+        assert!(!scan.arena.flags[0].contains(Flags::ERROR));
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn rejects_missing_or_unreadable_roots() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("unshift-badroot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+
+        let missing = base.join("missing");
+        let err = resolve_root(missing.to_str().unwrap()).unwrap_err();
+        assert!(err.starts_with(&format!("Can't open {}", missing.display())), "{err}");
+
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let err = resolve_root(base.to_str().unwrap()).unwrap_err();
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(err.starts_with(&format!("Can't read {}", base.display())), "{err}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    fn scan_of(root: &Path, arena: Arena) -> Scan {
+        let index = ChildIndex::build(&arena);
+        Scan { root: root.to_path_buf(), arena, index, hits: PolicyHits::default() }
+    }
+
+    fn by_name<'a>(found: &'a [Suggestion], name: &str) -> Option<&'a Suggestion> {
+        found.iter().find(|s| s.entry.name == name)
+    }
+
+    #[test]
+    fn suggests_each_app_cache_but_not_the_caches_folder() {
+        // Real directories, so the writability guard sees writable parents.
+        let base = std::env::temp_dir().join(format!("unshift-caches-{}", std::process::id()));
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join("Library/Caches")).unwrap();
+        std::fs::create_dir_all(home.join("Library/Developer/CoreSimulator/Caches")).unwrap();
+
+        let mut a = Arena::default();
+        let root = a.push(NONE, base.as_os_str().as_encoded_bytes(), 0, 0, Flags::DIR);
+        let h = a.push(root, b"home", 0, 0, Flags::DIR);
+        let lib = a.push(h, b"Library", 0, 0, Flags::DIR);
+        let caches = a.push(lib, b"Caches", 0, 0, Flags::DIR);
+        let app = a.push(caches, b"com.example.app", 0, 0, Flags::DIR);
+        a.push(app, b"blob", 10, 0, Flags::empty());
+        a.push(caches, b"loose.db", 5, 0, Flags::empty());
+        let dev = a.push(lib, b"Developer", 0, 0, Flags::DIR);
+        let sim = a.push(dev, b"CoreSimulator", 0, 0, Flags::DIR);
+        let sim_caches = a.push(sim, b"Caches", 0, 0, Flags::DIR);
+        let dyld = a.push(sim_caches, b"dyld", 0, 0, Flags::DIR);
+        a.push(dyld, b"shared", 7, 0, Flags::empty());
+        a.aggregate();
+        let scan = scan_of(&base, a);
+
+        let found = collect_suggestions(&Policy::default(), &scan, &home, 0);
+        std::fs::remove_dir_all(&base).unwrap();
+
+        for name in ["com.example.app", "loose.db", "dyld"] {
+            let s = by_name(&found, name).unwrap_or_else(|| panic!("{name} not suggested"));
+            assert_eq!(s.safety, "safe");
+            assert_eq!(s.reason, "App cache. Rebuilt automatically the next time the app runs.");
+        }
+        assert!(by_name(&found, "Caches").is_none());
+        assert!(by_name(&found, "blob").is_none());
+        assert!(by_name(&found, "shared").is_none());
+    }
+
+    #[test]
+    fn skips_var_folders_and_keeps_items_in_protected_directories() {
+        let mut a = Arena::default();
+        let root = a.push(NONE, b"/", 0, 0, Flags::DIR);
+        let private = a.push(root, b"private", 0, 0, Flags::DIR);
+        let var = a.push(private, b"var", 0, 0, Flags::DIR);
+        let folders = a.push(var, b"folders", 0, 0, Flags::DIR);
+        a.push(folders, b"tmpfile", 10, 0, Flags::empty());
+        a.push(var, b"Docker.raw", 10, 0, Flags::empty());
+        a.aggregate();
+        let scan = scan_of(Path::new("/"), a);
+
+        let found = collect_suggestions(&Policy::default(), &scan, Path::new("/nonexistent-home"), 0);
+
+        assert!(by_name(&found, "folders").is_none());
+        let docker = by_name(&found, "Docker.raw").expect("Docker.raw suggested");
+        assert_eq!(docker.safety, "keep");
+        assert_eq!(docker.reason, "Protected by macOS and cannot be moved by Unshift.");
     }
 }

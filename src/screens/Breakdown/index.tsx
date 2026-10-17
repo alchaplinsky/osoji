@@ -1,4 +1,4 @@
-import { useMemo, type ComponentType } from "react";
+import { useMemo, type ComponentType, type ReactNode } from "react";
 import type { ThemeName } from "../../design/theme";
 import type { NodeInfo, ViewNode } from "../../lib/api";
 import type { BinItem, HoverId, Viz, Volume } from "../../lib/types";
@@ -37,6 +37,8 @@ type BreakdownScreenProps = {
   onToggleBin: (id: number) => void;
   onRemoveFromBin: (id: number) => void;
   onReview: () => void;
+  /** Notice shown between the toolbar and the capacity bar. */
+  banner?: ReactNode;
 };
 
 const HINTS: Record<Viz, string> = {
@@ -71,6 +73,7 @@ export default function BreakdownScreen({
   onToggleBin,
   onRemoveFromBin,
   onReview,
+  banner,
 }: BreakdownScreenProps) {
   const ownIds = useMemo(() => new Set(binItems.map((item) => item.id)), [binItems]);
   const binIds = tickedIds ?? ownIds;
@@ -92,6 +95,7 @@ export default function BreakdownScreen({
   return (
     <section className={styles.screen}>
       <BreakdownToolbar info={info} onNavigate={onNavigate} onRescan={onRescan} onReveal={onReveal} />
+      {banner}
       <CapacityBar
         volume={volume}
         root={rootView}
