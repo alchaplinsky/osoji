@@ -31,7 +31,9 @@ export default function Menu({ open, onClose, items, className }: Props) {
 
   if (!open) return null;
   return (
-    <div ref={ref} role="menu" className={cx(styles.menu, className)}>
+    // Menus open inside toolbars that are window drag regions; a press on the menu's own padding
+    // must never start moving the window.
+    <div ref={ref} role="menu" className={cx(styles.menu, className)} data-tauri-drag-region="false">
       {items.map((it, i) => (
         <button
           key={i}

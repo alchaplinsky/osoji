@@ -1,6 +1,9 @@
 //! Tauri backend: owns the scan state and exposes bounded views to the UI.
 //! The arena never crosses IPC; commands return only what is on screen.
 
+#[cfg(target_os = "macos")]
+mod zoom;
+
 use scan_core::{Arena, Cancel, ChildIndex, Flags, NodeId, Progress, ScanConfig, NONE};
 use serde::Serialize;
 use std::borrow::Cow;
@@ -698,6 +701,20 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
+        .setup(|app| {
+            // Double-click on a drag region zooms the window; route that zoom through the
+            // animator so the page follows the frame instead of freezing (zoom.rs).
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::Manager;
+                match app.get_webview_window("main").map(|w| w.ns_window()) {
+                    Some(Ok(ns_window)) => zoom::install(ns_window),
+                    Some(Err(e)) => eprintln!("zoom: no NSWindow for main ({e}); zoom stays native"),
+                    None => eprintln!("zoom: no main window at setup; zoom stays native"),
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             start_scan,
             cancel_scan,
