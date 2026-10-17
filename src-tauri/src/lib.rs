@@ -701,11 +701,11 @@ fn volumes() -> Result<Vec<VolumeInfo>, String> {
 
 fn volume_from(st: &libc::statfs) -> VolumeInfo {
     let mount = unsafe { CStr::from_ptr(st.f_mntonname.as_ptr()) }.to_string_lossy().into_owned();
-    let bsize = st.f_bsize as u64;
+    let bsize = u64::from(st.f_bsize);
     VolumeInfo {
         name: volume_name(&mount),
-        total: st.f_blocks as u64 * bsize,
-        free: st.f_bavail as u64 * bsize,
+        total: st.f_blocks * bsize,
+        free: st.f_bavail * bsize,
         mount,
     }
 }
