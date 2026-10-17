@@ -1,17 +1,29 @@
 .root {
-  display: flex;
-  align-items: center;
+  position: relative;
   flex: 1;
   min-width: 0;
+}
+
+/* The measured strip: crumbs never shrink, so overflow here means a middle crumb has to collapse. */
+.chain {
+  display: flex;
+  align-items: center;
   overflow: hidden;
   white-space: nowrap;
 }
 
 .crumb {
+  flex: none;
   display: flex;
   align-items: center;
+}
+
+/* Once nothing more can collapse, the current folder's name gives way instead of overlapping neighbours. */
+.exhausted .crumb:last-child {
+  flex-shrink: 1;
   min-width: 0;
 }
+.exhausted .crumb:last-child .btn { min-width: 0; }
 
 .sep {
   flex: none;
@@ -31,16 +43,23 @@
   white-space: nowrap;
   cursor: pointer;
 }
-
-/* Long folder names ellipsize so a deep path still fits beside the toolbar controls. */
-.btn:not(.current) { max-width: 180px; }
-.btn:not(.current) > span {
+.btn:hover { background: var(--card2); }
+.btn > span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.btn:hover { background: var(--card2); }
+
+/* Long ancestor names ellipsize so one folder cannot eat the whole trail. */
+.btn:not(.current) { max-width: 180px; }
 
 .current {
   color: var(--fg);
   font-weight: 600;
+}
+
+/* The hidden-folders menu opens under the "…" crumb, not at the toolbar's right edge. */
+.root .menu {
+  right: auto;
+  left: var(--menu-x, 0);
 }
