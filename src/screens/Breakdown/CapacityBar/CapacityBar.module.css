@@ -32,6 +32,17 @@
 }
 .segmentDimmed { opacity: .4; }
 
+/* Used space the scan could not see. Not a slice: no hover, no click. */
+.notScanned {
+  cursor: help;
+  transition: width .7s var(--ease-out), opacity .2s;
+}
+
+/* Diagonal stripes of `--hatch` over the track; shared by the hidden segment and its swatch. */
+.hatched {
+  background: repeating-linear-gradient(135deg, var(--hatch) 0 2px, transparent 2px 4px);
+}
+
 .pendingStripe {
   position: absolute;
   top: 0;
@@ -58,6 +69,7 @@
   transition: opacity .2s;
 }
 .legendDimmed { opacity: .45; }
+.legendStatic { cursor: help; }
 
 .swatch {
   width: 8px;
