@@ -19,7 +19,9 @@
         "minHeight": 600,
         "titleBarStyle": "Overlay",
         "dragDropEnabled": false,
-        "hiddenTitle": true
+        "hiddenTitle": true,
+        "visible": false,
+        "backgroundColor": "#0C0C0E"
       }
     ],
     "security": { "csp": null }

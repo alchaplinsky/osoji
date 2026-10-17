@@ -99,10 +99,28 @@ reason = "All your installed apps. Remove single apps instead."
 match = { path = "/Applications" }
 
 [[rule]]
+id = "utilities"
+kind = "protected"
+reason = "Apps that ship with macOS, such as Terminal and Disk Utility."
+match = { path = "/Applications/Utilities" }
+
+[[rule]]
 id = "swap"
 kind = "protected"
 reason = "Swap files. macOS manages these itself."
 match = { path = "/private/var/vm" }
+
+[[rule]]
+id = "icloud-drive"
+kind = "protected"
+reason = "Your iCloud Drive. Removing it deletes the files on every device signed in to iCloud."
+match = { path = "~/Library/Mobile Documents" }
+
+[[rule]]
+id = "cloud-storage"
+kind = "protected"
+reason = "Dropbox, Google Drive, OneDrive and similar. Removing it deletes the files in those services too."
+match = { path = "~/Library/CloudStorage" }
 
 [[rule]]
 id = "home"
@@ -207,6 +225,12 @@ id = "public"
 kind = "risky"
 reason = "Your personal files. Remove items inside it instead of the whole folder."
 match = { path = "~/Public" }
+
+[[rule]]
+id = "shared-users"
+kind = "risky"
+reason = "Files shared between every account on this Mac."
+match = { path = "/Users/Shared" }
 
 [[rule]]
 id = "photos-library"

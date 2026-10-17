@@ -10,7 +10,9 @@ export type { RootChoice };
 
 type SidebarProps = {
   volume: Volume | null;
+  volumes: Volume[];
   scanRoot: string;
+  home?: string;
   rootPickerDisabled?: boolean;
   onPickRoot: (choice: RootChoice) => void;
   trash?: TrashInfo | null;
@@ -21,7 +23,7 @@ type SidebarProps = {
   watchers?: { badge?: string } | null;
 };
 
-export default function Sidebar({ volume, scanRoot, rootPickerDisabled, onPickRoot, trash, scanned, screen, onNavigate, suggestBadge, watchers }: SidebarProps) {
+export default function Sidebar({ volume, volumes, scanRoot, home, rootPickerDisabled, onPickRoot, trash, scanned, screen, onNavigate, suggestBadge, watchers }: SidebarProps) {
   const item = (target: Screen) => {
     const locked = target !== "scan" && target !== "settings" && !scanned;
     return {
@@ -35,7 +37,7 @@ export default function Sidebar({ volume, scanRoot, rootPickerDisabled, onPickRo
     <aside className={styles.sidebar}>
       <div className={styles.top} data-tauri-drag-region="deep" />
 
-      <DiskCard volume={volume} scanRoot={scanRoot} disabled={rootPickerDisabled} onPickRoot={onPickRoot} />
+      <DiskCard volume={volume} volumes={volumes} scanRoot={scanRoot} home={home} disabled={rootPickerDisabled} onPickRoot={onPickRoot} />
       {trash && trash.size > 0 && <TrashLine trash={trash} />}
 
       <NavSection>

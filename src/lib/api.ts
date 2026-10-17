@@ -49,3 +49,4 @@ export const homeDir = () => invoke<string>("home_dir");
 export const volumeInfo = (path: string) => invoke<VolumeInfo>("volume_info", { path });
 export const fullDiskAccess = () => invoke<boolean>("full_disk_access");
 export const openPrivacySettings = () => invoke<void>("open_privacy_settings");
+export const volumes = () => invoke<VolumeInfo[]>("volumes");
