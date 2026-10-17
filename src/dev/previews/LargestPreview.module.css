@@ -6,7 +6,7 @@
 }
 
 .sidebar {
-  width: 206px;
+  width: var(--side-w);
   flex: none;
 }
 
