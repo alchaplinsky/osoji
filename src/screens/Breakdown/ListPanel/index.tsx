@@ -2,6 +2,7 @@ import type { ThemeName } from "../../../design/theme";
 import type { ViewNode } from "../../../lib/api";
 import type { HoverId } from "../../../lib/types";
 import { humanBytes } from "../../../lib/format";
+import { isProtected } from "../../../lib/bin";
 import { Mono, Panel } from "../../../components/ui";
 import { startBinDrag } from "../BinBar";
 import { slicesOf } from "../slices";
@@ -32,7 +33,7 @@ export default function ListPanel({ view, theme, hoverId, onHover, onOpen, binId
         </Mono>
       </div>
       <div className={styles.list}>
-        {slices.map(({ node, key, hover, name, size, fill }) => (
+        {slices.map(({ node, key, hover, name, size, fill, guard }) => (
           <ListRow
             key={key}
             name={name}
@@ -42,11 +43,12 @@ export default function ListPanel({ view, theme, hoverId, onHover, onOpen, binId
             dir={!!node?.dir}
             hovered={hoverId === hover}
             inBin={!!node && binIds.has(node.id)}
+            guard={guard}
             onEnter={() => onHover(hover)}
             onLeave={() => onHover(null)}
             onOpen={node ? () => onOpen(node.id) : undefined}
-            onToggleBin={node ? () => onToggleBin(node.id) : undefined}
-            onDragStart={node ? (e) => startBinDrag(e, node.id) : undefined}
+            onToggleBin={node && !isProtected(node) ? () => onToggleBin(node.id) : undefined}
+            onDragStart={node && !isProtected(node) ? (e) => startBinDrag(e, node.id) : undefined}
           />
         ))}
       </div>

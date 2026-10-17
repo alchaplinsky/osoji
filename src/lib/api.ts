@@ -1,5 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import type { FileEntry, Suggestion } from "./types";
+import type { FileEntry, Guard, Suggestion } from "./types";
 
 /** Bytes found so far under one of the scan root's direct children. */
 export type TopProgress = { name: string; bytes: number };
@@ -7,12 +7,12 @@ export type ProgressMsg = { files: number; dirs: number; bytes: number; errors: 
 export type ScanSummary = { root: string; entries: number; bytes: number; errors: number; elapsed_ms: number; cancelled: boolean };
 export type ViewNode = {
   id: number; name: string; size: number; items: number; dir: boolean; error: boolean;
-  children: ViewNode[]; other: number; other_count: number;
+  children: ViewNode[]; other: number; other_count: number; guard?: Guard | null;
 };
 export type Crumb = { id: number; name: string };
 export type NodeInfo = {
   id: number; name: string; path: string; size: number; items: number; dir: boolean;
-  error: boolean; trashed: boolean; mtime: number; ancestors: Crumb[];
+  error: boolean; trashed: boolean; mtime: number; ancestors: Crumb[]; guard?: Guard | null;
 };
 export type TrashResult = { bytes: number; count: number; trashed: number[]; failed: string[] };
 export type VolumeInfo = { name: string; mount: string; total: number; free: number };

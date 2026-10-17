@@ -1,7 +1,7 @@
 import type { ThemeName } from "../../design/theme";
 import { neutral, tone } from "../../design/palette";
 import type { ViewNode } from "../../lib/api";
-import type { HoverId } from "../../lib/types";
+import type { Guard, HoverId } from "../../lib/types";
 import { otherKey, type SliceKey } from "../../components/Sunburst/layout";
 
 export type Slice = {
@@ -11,12 +11,13 @@ export type Slice = {
   name: string;
   size: number;
   fill: string;
+  guard: Guard | null;
 };
 
 export function slicesOf(view: ViewNode, theme: ThemeName): Slice[] {
-  const slices: Slice[] = view.children.map((n, i) => ({ node: n, key: n.id, hover: n.id, name: n.name, size: n.size, fill: tone(theme, i) }));
+  const slices: Slice[] = view.children.map((n, i) => ({ node: n, key: n.id, hover: n.id, name: n.name, size: n.size, fill: tone(theme, i), guard: n.guard ?? null }));
   if (view.other > 0) {
-    slices.push({ node: null, key: otherKey(view.id), hover: "other", name: `${view.other_count} smaller items`, size: view.other, fill: neutral(theme) });
+    slices.push({ node: null, key: otherKey(view.id), hover: "other", name: `${view.other_count} smaller items`, size: view.other, fill: neutral(theme), guard: null });
   }
   return slices;
 }
@@ -31,14 +32,14 @@ export function visibleSlices(view: ViewNode, theme: ThemeName, max = 14, minSha
   let restCount = view.other_count;
   view.children.forEach((n, i) => {
     if (i < max && view.size > 0 && n.size / view.size >= minShare) {
-      slices.push({ node: n, key: n.id, hover: n.id, name: n.name, size: n.size, fill: tone(theme, i) });
+      slices.push({ node: n, key: n.id, hover: n.id, name: n.name, size: n.size, fill: tone(theme, i), guard: n.guard ?? null });
     } else {
       restSize += n.size;
       restCount += 1;
     }
   });
   if (restSize > 0) {
-    slices.push({ node: null, key: otherKey(view.id), hover: "other", name: `${restCount} smaller items`, size: restSize, fill: neutral(theme) });
+    slices.push({ node: null, key: otherKey(view.id), hover: "other", name: `${restCount} smaller items`, size: restSize, fill: neutral(theme), guard: null });
   }
   return slices;
 }

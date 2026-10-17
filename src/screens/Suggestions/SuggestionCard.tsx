@@ -1,4 +1,6 @@
-import { Button, Card, Mono } from "../../components/ui";
+import { Badge, Button, Card, Mono } from "../../components/ui";
+import GuardIcon from "../../components/GuardIcon";
+import { isProtected } from "../../lib/bin";
 import { humanBytes } from "../../lib/format";
 import type { Suggestion } from "../../lib/types";
 import { startBinDrag } from "../Breakdown/BinBar";
@@ -13,20 +15,30 @@ type SuggestionCardProps = {
 const parentPath = (path: string) => path.slice(0, path.lastIndexOf("/")) || "/";
 
 export default function SuggestionCard({ suggestion, inBin, onToggle }: SuggestionCardProps) {
-  const { id, name, path, size, reason, safety } = suggestion;
+  const { id, name, path, size, reason, safety, guard } = suggestion;
+  const locked = isProtected(suggestion);
   return (
-    <Card className={styles.card} draggable onDragStart={(e) => startBinDrag(e, id)}>
+    <Card className={styles.card} draggable={!locked} onDragStart={locked ? undefined : (e) => startBinDrag(e, id)}>
       <div className={styles.text}>
-        <div className={styles.name}>{name}</div>
+        <div className={styles.title}>
+          <div className={styles.name}>{name}</div>
+          {!locked && <GuardIcon guard={guard} />}
+        </div>
         <Mono className={styles.path}>{parentPath(path)}</Mono>
         <div className={styles.reason}>{reason}</div>
       </div>
       <div className={styles.side}>
         <Mono className={styles.size}>{humanBytes(size)}</Mono>
-        {safety !== "keep" && (
-          <Button size="sm" variant={inBin ? "primary" : "outline"} onClick={onToggle}>
-            {inBin ? "Added" : "Add to bin"}
-          </Button>
+        {locked ? (
+          <Badge tone="keep" title={guard?.reason}>
+            Protected
+          </Badge>
+        ) : (
+          safety !== "keep" && (
+            <Button size="sm" variant={inBin ? "primary" : "outline"} onClick={onToggle}>
+              {inBin ? "Added" : "Add to bin"}
+            </Button>
+          )
         )}
       </div>
     </Card>

@@ -5,6 +5,7 @@
 mod zoom;
 
 use scan_core::{Arena, Cancel, ChildIndex, Flags, NodeId, Progress, ScanConfig, NONE};
+use scan_policy::{Policy, PolicyContext, PolicyHits};
 use serde::Serialize;
 use std::borrow::Cow;
 use std::cmp::Reverse;
@@ -21,6 +22,7 @@ struct Scan {
     root: PathBuf,
     arena: Arena,
     index: ChildIndex,
+    hits: PolicyHits,
 }
 
 #[derive(Default)]
@@ -28,6 +30,24 @@ struct AppState {
     scan: Mutex<Option<Scan>>,
     cancel: Mutex<Option<Arc<Cancel>>>,
     running: AtomicBool,
+    policy: Policy,
+}
+
+/// Why the UI should treat a node with care: "protected", "risky" or "unexpected".
+#[derive(Serialize, Debug, PartialEq)]
+struct Guard {
+    kind: &'static str,
+    reason: String,
+}
+
+const POLICY_FLAGS: Flags = Flags::PROTECTED.union(Flags::RISKY).union(Flags::UNEXPECTED);
+
+fn guard_of(policy: &Policy, scan: &Scan, id: NodeId) -> Option<Guard> {
+    if !scan.arena.flags[id as usize].intersects(POLICY_FLAGS) {
+        return None;
+    }
+    let rule = policy.rule(scan.hits.rule(id)?);
+    Some(Guard { kind: rule.kind.as_str(), reason: rule.reason.clone() })
 }
 
 #[derive(Serialize, Clone)]
@@ -70,6 +90,7 @@ struct ViewNode {
     children: Vec<ViewNode>,
     other: u64,
     other_count: u32,
+    guard: Option<Guard>,
 }
 
 #[derive(Serialize)]
@@ -90,6 +111,7 @@ struct NodeInfo {
     trashed: bool,
     mtime: i64,
     ancestors: Vec<Crumb>,
+    guard: Option<Guard>,
 }
 
 #[derive(Serialize)]
@@ -109,6 +131,7 @@ struct FileEntry {
     mtime: i64,
     dir: bool,
     ancestors: Vec<NodeId>,
+    guard: Option<Guard>,
 }
 
 #[derive(Serialize)]
@@ -134,7 +157,8 @@ fn ancestors_of(arena: &Arena, id: NodeId) -> Vec<NodeId> {
     out
 }
 
-fn file_entry(arena: &Arena, id: NodeId) -> FileEntry {
+fn file_entry(policy: &Policy, scan: &Scan, id: NodeId) -> FileEntry {
+    let arena = &scan.arena;
     let i = id as usize;
     FileEntry {
         id,
@@ -144,6 +168,7 @@ fn file_entry(arena: &Arena, id: NodeId) -> FileEntry {
         mtime: arena.mtime[i],
         dir: arena.flags[i].contains(Flags::DIR),
         ancestors: ancestors_of(arena, id),
+        guard: guard_of(policy, scan, id),
     }
 }
 
@@ -236,8 +261,10 @@ async fn start_scan(
     state.cancel.lock().unwrap().take();
 
     let result = task.map_err(|e| e.to_string())?;
-    let arena = result.map_err(|e| e.to_string())?;
+    let mut arena = result.map_err(|e| e.to_string())?;
     let index = ChildIndex::build(&arena);
+    let ctx = PolicyContext { home: home_path(), now: unix_now() };
+    let hits = state.policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
     let summary = ScanSummary {
         root: root.clone(),
         entries: arena.len(),
@@ -246,8 +273,18 @@ async fn start_scan(
         elapsed_ms: t0.elapsed().as_millis() as u64,
         cancelled: cancel.load(Ordering::Relaxed),
     };
-    *state.scan.lock().unwrap() = Some(Scan { root: cfg.root, arena, index });
+    *state.scan.lock().unwrap() = Some(Scan { root: cfg.root, arena, index, hits });
     Ok(summary)
+}
+
+fn home_path() -> PathBuf {
+    PathBuf::from(std::env::var("HOME").unwrap_or_default())
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
 }
 
 #[tauri::command]
@@ -257,7 +294,7 @@ fn cancel_scan(state: State<'_, AppState>) {
     }
 }
 
-fn build_view(scan: &Scan, id: NodeId, depth: u8, top_k: usize, min_size: u64) -> ViewNode {
+fn build_view(policy: &Policy, scan: &Scan, id: NodeId, depth: u8, top_k: usize, min_size: u64) -> ViewNode {
     let a = &scan.arena;
     let i = id as usize;
     let flags = a.flags[i];
@@ -271,6 +308,7 @@ fn build_view(scan: &Scan, id: NodeId, depth: u8, top_k: usize, min_size: u64) -
         children: Vec::new(),
         other: 0,
         other_count: 0,
+        guard: guard_of(policy, scan, id),
     };
     if depth == 0 || !node.dir {
         return node;
@@ -281,7 +319,7 @@ fn build_view(scan: &Scan, id: NodeId, depth: u8, top_k: usize, min_size: u64) -
             continue;
         }
         if node.children.len() < top_k && a.size[ci] >= min_size {
-            node.children.push(build_view(scan, c, depth - 1, top_k, min_size));
+            node.children.push(build_view(policy, scan, c, depth - 1, top_k, min_size));
         } else {
             node.other += a.size[ci];
             node.other_count += 1;
@@ -304,7 +342,7 @@ fn get_view(
         return Err("unknown node".into());
     }
     let min_size = (scan.arena.size[node as usize] as f64 * min_fraction) as u64;
-    Ok(build_view(scan, node, depth, top_k, min_size.max(1)))
+    Ok(build_view(&state.policy, scan, node, depth, top_k, min_size.max(1)))
 }
 
 #[tauri::command]
@@ -328,6 +366,7 @@ fn node_info(state: State<'_, AppState>, node: NodeId) -> Result<NodeInfo, Strin
         trashed: f.contains(Flags::TRASHED),
         mtime: a.mtime[node as usize],
         ancestors,
+        guard: guard_of(&state.policy, scan, node),
     })
 }
 
@@ -360,7 +399,7 @@ fn largest_files(state: State<'_, AppState>, limit: usize) -> Result<Vec<FileEnt
         }
         stack.extend(scan.index.children(id).iter().rev());
     }
-    Ok(heap.into_sorted_vec().into_iter().map(|Reverse((_, id))| file_entry(a, id)).collect())
+    Ok(heap.into_sorted_vec().into_iter().map(|Reverse((_, id))| file_entry(&state.policy, scan, id)).collect())
 }
 
 const DAY: i64 = 86_400;
@@ -498,7 +537,7 @@ fn suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
     if a.is_empty() {
         return Ok(Vec::new());
     }
-    let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
+    let home = home_path();
     let has_home = home.is_absolute();
     let at = |rel: &str| if has_home { find_node(scan, &home.join(rel)) } else { NONE };
     let xcode_path = home.join("Library/Developer/Xcode");
@@ -521,9 +560,7 @@ fn suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
     if has_home && scan.root.starts_with(&xcode_path) {
         root_ctx |= UNDER_XCODE;
     }
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64);
+    let now = unix_now();
 
     let mut found: Vec<(u64, NodeId, &'static str, Cow<'static, str>)> = Vec::new();
     let mut stack: Vec<(NodeId, u8)> = vec![(0, root_ctx)];
@@ -557,7 +594,7 @@ fn suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
     found.truncate(200);
     Ok(found
         .into_iter()
-        .map(|(_, id, safety, reason)| Suggestion { entry: file_entry(a, id), safety, reason: reason.into_owned() })
+        .map(|(_, id, safety, reason)| Suggestion { entry: file_entry(&state.policy, scan, id), safety, reason: reason.into_owned() })
         .collect())
 }
 
@@ -615,10 +652,40 @@ fn reveal(state: State<'_, AppState>, node: NodeId) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn trash_nodes(state: State<'_, AppState>, nodes: Vec<NodeId>) -> Result<TrashResult, String> {
-    let mut guard = state.scan.lock().unwrap();
-    let scan = guard.as_mut().ok_or("no scan loaded")?;
+fn has_ancestor(a: &Arena, id: NodeId, ancestor: NodeId) -> bool {
+    let mut p = a.parent[id as usize];
+    while p != NONE {
+        if p == ancestor {
+            return true;
+        }
+        p = a.parent[p as usize];
+    }
+    false
+}
+
+/// Why `id` must not go to the Trash: it is protected, or it holds a protected node that would go with it.
+fn protection(policy: &Policy, scan: &Scan, id: NodeId) -> Option<String> {
+    let a = &scan.arena;
+    let reason = |node: NodeId| scan.hits.rule(node).map_or("", |r| policy.rule(r).reason.as_str());
+    if a.flags[id as usize].contains(Flags::PROTECTED) {
+        return Some(format!("{}: protected. {}", a.path(id).display(), reason(id)));
+    }
+    let inner = scan
+        .hits
+        .iter()
+        .map(|(node, _)| node)
+        .filter(|&node| a.flags[node as usize].contains(Flags::PROTECTED) && has_ancestor(a, node, id))
+        .min()?;
+    Some(format!("{}: protected. It contains {}. {}", a.path(id).display(), a.path(inner).display(), reason(inner)))
+}
+
+/// Move `nodes` to the Trash through `delete`, skipping protected ones, and update the tree.
+fn sweep(
+    policy: &Policy,
+    scan: &mut Scan,
+    nodes: Vec<NodeId>,
+    mut delete: impl FnMut(&Path) -> Result<(), String>,
+) -> Result<TrashResult, String> {
     let mut bytes = 0u64;
     let mut trashed = Vec::new();
     let mut failed = Vec::new();
@@ -633,7 +700,11 @@ fn trash_nodes(state: State<'_, AppState>, nodes: Vec<NodeId>) -> Result<TrashRe
         if !path.starts_with(&scan.root) {
             return Err(format!("refusing to trash {} outside the scan root", path.display()));
         }
-        if let Err(e) = trash::delete(&path) {
+        if let Some(refusal) = protection(policy, scan, id) {
+            failed.push(refusal);
+            continue;
+        }
+        if let Err(e) = delete(&path) {
             failed.push(format!("{}: {e}", path.display()));
             continue;
         }
@@ -647,6 +718,13 @@ fn trash_nodes(state: State<'_, AppState>, nodes: Vec<NodeId>) -> Result<TrashRe
         }
     }
     Ok(TrashResult { bytes, count: trashed.len(), trashed, failed })
+}
+
+#[tauri::command]
+fn trash_nodes(state: State<'_, AppState>, nodes: Vec<NodeId>) -> Result<TrashResult, String> {
+    let mut guard = state.scan.lock().unwrap();
+    let scan = guard.as_mut().ok_or("no scan loaded")?;
+    sweep(&state.policy, scan, nodes, |path| trash::delete(path).map_err(|e| e.to_string()))
 }
 
 #[tauri::command]
@@ -698,9 +776,10 @@ fn volume_name(mount: &str) -> String {
 pub fn run() {
     scan_macos::disable_dataless_materialization();
     scan_macos::raise_fd_limit();
+    let policy = Policy::for_current_os().unwrap_or_else(|e| panic!("bundled {e}"));
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState::default())
+        .manage(AppState { policy, ..AppState::default() })
         .setup(|app| {
             // Double-click on a drag region zooms the window; route that zoom through the
             // animator so the page follows the frame instead of freezing (zoom.rs).
@@ -743,7 +822,7 @@ mod tests {
         let file = arena.push(folder, b"file.bin", 10, 0, Flags::empty());
         arena.aggregate();
         let index = ChildIndex::build(&arena);
-        (Scan { root: PathBuf::from("/tmp/root"), arena, index }, folder, file)
+        (Scan { root: PathBuf::from("/tmp/root"), arena, index, hits: PolicyHits::default() }, folder, file)
     }
 
     #[test]
@@ -765,5 +844,66 @@ mod tests {
         assert!(in_trash(&scan.arena, file));
         assert_eq!(scan.arena.size[0], 0);
         assert_eq!(scan.arena.items[0], 0);
+    }
+
+    const GUARD_POLICY: &str = r#"
+        version = 1
+        [[rule]]
+        id = "keep"
+        kind = "protected"
+        reason = "Keep it."
+        match = { path = "/tmp/root/keep" }
+        [[rule]]
+        id = "vault"
+        kind = "protected"
+        reason = "A vault."
+        match = { name = ".vault", dir = true }
+        [[rule]]
+        id = "big"
+        kind = "risky"
+        reason = "Big file."
+        match = { name = "loose.bin" }
+    "#;
+
+    #[test]
+    fn sweep_refuses_protected_nodes_and_trashes_the_rest() {
+        let mut arena = Arena::default();
+        let root = arena.push(NONE, b"/tmp/root", 0, 0, Flags::DIR);
+        let keep = arena.push(root, b"keep", 0, 0, Flags::DIR);
+        let boxed = arena.push(root, b"box", 0, 0, Flags::DIR);
+        let loose = arena.push(root, b"loose.bin", 7, 0, Flags::empty());
+        let inner = arena.push(keep, b"inner.bin", 3, 0, Flags::empty());
+        arena.push(boxed, b".vault", 0, 0, Flags::DIR);
+        arena.aggregate();
+        let index = ChildIndex::build(&arena);
+        let policy = Policy::from_toml(GUARD_POLICY).unwrap();
+        let ctx = PolicyContext { home: PathBuf::new(), now: 0 };
+        let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
+        let mut scan = Scan { root: PathBuf::from("/tmp/root"), arena, index, hits };
+
+        assert_eq!(guard_of(&policy, &scan, keep), Some(Guard { kind: "protected", reason: "Keep it.".into() }));
+        assert_eq!(guard_of(&policy, &scan, loose), Some(Guard { kind: "risky", reason: "Big file.".into() }));
+        assert_eq!(guard_of(&policy, &scan, inner), None);
+
+        let mut deleted = Vec::new();
+        let result = sweep(&policy, &mut scan, vec![keep, boxed, loose, inner], |p| {
+            deleted.push(p.to_path_buf());
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(result.trashed, vec![loose, inner]);
+        assert_eq!(result.bytes, 10);
+        assert_eq!(
+            result.failed,
+            vec![
+                "/tmp/root/keep: protected. Keep it.".to_string(),
+                "/tmp/root/box: protected. It contains /tmp/root/box/.vault. A vault.".to_string(),
+            ]
+        );
+        assert_eq!(deleted, vec![PathBuf::from("/tmp/root/loose.bin"), PathBuf::from("/tmp/root/keep/inner.bin")]);
+        assert!(!scan.arena.flags[keep as usize].contains(Flags::TRASHED));
+        assert!(!scan.arena.flags[boxed as usize].contains(Flags::TRASHED));
+        assert!(scan.arena.flags[loose as usize].contains(Flags::TRASHED));
     }
 }

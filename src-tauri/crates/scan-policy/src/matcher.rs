@@ -1,0 +1,283 @@
+use crate::lookup::{expand, find_node};
+use crate::schema::{Kind, Rule};
+use scan_core::{Arena, ChildIndex, Flags, NodeId, NONE};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+const DAY: i64 = 86_400;
+
+pub struct PolicyContext {
+    pub home: PathBuf,
+    /// Unix seconds, compared against node mtimes.
+    pub now: i64,
+}
+
+/// Which nodes a rule can match, narrowest first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Scope {
+    Node(NodeId),
+    Children(NodeId),
+    All,
+}
+
+/// A rule with its paths resolved to nodes and its strings borrowed as bytes.
+struct Compiled<'a> {
+    rule: usize,
+    kind: Kind,
+    path: Option<NodeId>,
+    parent: Option<NodeId>,
+    under: Option<NodeId>,
+    name: Option<&'a [u8]>,
+    suffix: Option<&'a [u8]>,
+    not_named: &'a [String],
+    dir: Option<bool>,
+    sibling: Option<&'a [u8]>,
+    min_bytes: Option<u64>,
+    mtime_before: Option<i64>,
+}
+
+impl Compiled<'_> {
+    fn scope(&self) -> Scope {
+        match (self.path, self.parent) {
+            (Some(n), _) => Scope::Node(n),
+            (None, Some(p)) => Scope::Children(p),
+            (None, None) => Scope::All,
+        }
+    }
+}
+
+/// A policy bound to one scan: path fields are resolved to node ids once.
+pub struct Resolved<'a> {
+    index: &'a ChildIndex,
+    rules: Vec<Compiled<'a>>,
+}
+
+/// The strongest rule that applies to each flagged node.
+#[derive(Debug, Default)]
+pub struct PolicyHits {
+    rules: HashMap<NodeId, usize>,
+}
+
+impl PolicyHits {
+    /// Index of the rule behind a node's PROTECTED, RISKY or UNEXPECTED flag.
+    pub fn rule(&self, id: NodeId) -> Option<usize> {
+        self.rules.get(&id).copied()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (NodeId, usize)> + '_ {
+        self.rules.iter().map(|(&id, &rule)| (id, rule))
+    }
+
+    pub fn len(&self) -> usize {
+        self.rules.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rules.is_empty()
+    }
+}
+
+fn flag_of(kind: Kind) -> Flags {
+    match kind {
+        Kind::Protected => Flags::PROTECTED,
+        Kind::Risky => Flags::RISKY,
+        Kind::Unexpected => Flags::UNEXPECTED,
+        Kind::Cleanup => Flags::empty(),
+    }
+}
+
+fn severity(kind: Kind) -> u8 {
+    match kind {
+        Kind::Protected => 3,
+        Kind::Risky => 2,
+        Kind::Unexpected => 1,
+        Kind::Cleanup => 0,
+    }
+}
+
+fn resolve_path(arena: &Arena, index: &ChildIndex, home: &Path, path: &Option<String>) -> Result<Option<NodeId>, ()> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let id = expand(path, home).map_or(NONE, |p| find_node(arena, index, &p));
+    if id == NONE {
+        Err(())
+    } else {
+        Ok(Some(id))
+    }
+}
+
+fn compile<'a>(idx: usize, rule: &'a Rule, arena: &Arena, index: &ChildIndex, ctx: &PolicyContext) -> Option<Compiled<'a>> {
+    let m = &rule.matcher;
+    let at = |p| resolve_path(arena, index, &ctx.home, p).ok();
+    Some(Compiled {
+        rule: idx,
+        kind: rule.kind,
+        path: at(&m.path)?,
+        parent: at(&m.parent)?,
+        under: at(&m.under)?,
+        name: m.name.as_deref().map(str::as_bytes),
+        suffix: m.suffix.as_deref().map(str::as_bytes),
+        not_named: &m.not_named,
+        dir: m.dir,
+        sibling: m.sibling.as_deref().map(str::as_bytes),
+        min_bytes: m.min_bytes,
+        mtime_before: m.older_than_days.map(|d| ctx.now - i64::from(d) * DAY),
+    })
+}
+
+/// True when `ancestor` is a proper ancestor of `id`. Ids only grow away from the root, so the walk
+/// stops as soon as it passes below `ancestor`.
+fn descends_from(arena: &Arena, id: NodeId, ancestor: NodeId) -> bool {
+    let mut p = arena.parent[id as usize];
+    while p != NONE && p >= ancestor {
+        if p == ancestor {
+            return true;
+        }
+        p = arena.parent[p as usize];
+    }
+    false
+}
+
+impl<'a> Resolved<'a> {
+    pub(crate) fn new(rules: &'a [Rule], arena: &Arena, index: &'a ChildIndex, ctx: &PolicyContext) -> Self {
+        let rules = rules.iter().enumerate().filter_map(|(i, r)| compile(i, r, arena, index, ctx)).collect();
+        Self { index, rules }
+    }
+
+    fn matches(&self, r: &Compiled, arena: &Arena, id: NodeId) -> bool {
+        let i = id as usize;
+        if r.dir.is_some_and(|d| arena.flags[i].contains(Flags::DIR) != d) {
+            return false;
+        }
+        let name = arena.name(id);
+        if r.name.is_some_and(|n| n != name) || r.suffix.is_some_and(|s| !name.ends_with(s)) {
+            return false;
+        }
+        if r.not_named.iter().any(|n| n.as_bytes() == name) {
+            return false;
+        }
+        if r.min_bytes.is_some_and(|m| arena.size[i] < m) {
+            return false;
+        }
+        if let Some(before) = r.mtime_before {
+            let mtime = arena.mtime[i];
+            if mtime <= 0 || mtime > before {
+                return false;
+            }
+        }
+        let parent = arena.parent[i];
+        if r.path.is_some_and(|p| p != id) || r.parent.is_some_and(|p| p != parent) {
+            return false;
+        }
+        if r.under.is_some_and(|u| !descends_from(arena, id, u)) {
+            return false;
+        }
+        match r.sibling {
+            None => true,
+            Some(s) => parent != NONE && self.index.children(parent).iter().any(|&c| c != id && arena.name(c) == s),
+        }
+    }
+
+    /// Call `hit(node, rule)` for every match of the rules `want` selects. Rules pinned to a path or a
+    /// parent test only those nodes; the rest share one pass over the arena.
+    fn each_match(&self, arena: &Arena, want: impl Fn(Kind) -> bool, mut hit: impl FnMut(NodeId, usize, Kind)) {
+        let mut sweep = Vec::new();
+        for r in self.rules.iter().filter(|r| want(r.kind)) {
+            match r.scope() {
+                Scope::Node(n) => {
+                    if self.matches(r, arena, n) {
+                        hit(n, r.rule, r.kind);
+                    }
+                }
+                Scope::Children(p) => {
+                    for &c in self.index.children(p) {
+                        if self.matches(r, arena, c) {
+                            hit(c, r.rule, r.kind);
+                        }
+                    }
+                }
+                Scope::All => sweep.push(r),
+            }
+        }
+        if sweep.is_empty() {
+            return;
+        }
+        for id in 0..arena.len() as NodeId {
+            for r in &sweep {
+                if self.matches(r, arena, id) {
+                    hit(id, r.rule, r.kind);
+                }
+            }
+        }
+    }
+
+    /// Set PROTECTED, RISKY and UNEXPECTED on every matching node and record, per node, the strongest
+    /// rule (protected over risky over unexpected, then the earliest in the file).
+    pub fn stamp(&self, arena: &mut Arena) -> PolicyHits {
+        let mut found: HashMap<NodeId, (usize, Kind, Flags)> = HashMap::new();
+        self.each_match(arena, |k| k != Kind::Cleanup, |id, rule, kind| {
+            let entry = found.entry(id).or_insert((rule, kind, Flags::empty()));
+            entry.2 |= flag_of(kind);
+            let (best, best_kind) = (entry.0, entry.1);
+            if (severity(kind), std::cmp::Reverse(rule)) > (severity(best_kind), std::cmp::Reverse(best)) {
+                (entry.0, entry.1) = (rule, kind);
+            }
+        });
+        let mut hits = PolicyHits { rules: HashMap::with_capacity(found.len()) };
+        for (id, (rule, _, flags)) in found {
+            arena.flags[id as usize] |= flags;
+            hits.rules.insert(id, rule);
+        }
+        hits
+    }
+
+    /// Every node a cleanup rule matches, with the first matching rule, ordered by node id.
+    /// Nested matches are all reported; callers decide whether a match covers its descendants.
+    pub fn cleanup_matches(&self, arena: &Arena) -> Vec<(NodeId, usize)> {
+        let mut found: HashMap<NodeId, usize> = HashMap::new();
+        self.each_match(arena, |k| k == Kind::Cleanup, |id, rule, _| {
+            if !arena.flags[id as usize].contains(Flags::TRASHED) {
+                let best = found.entry(id).or_insert(rule);
+                *best = (*best).min(rule);
+            }
+        });
+        let mut out: Vec<_> = found.into_iter().collect();
+        out.sort_unstable();
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::{ctx, fixture};
+    use crate::Policy;
+
+    #[test]
+    fn pins_path_and_parent_rules_to_their_nodes() {
+        let f = fixture();
+        let src = r#"
+            version = 1
+            [[rule]]
+            id = "direct"
+            kind = "protected"
+            reason = "x"
+            match = { path = "/System" }
+            [[rule]]
+            id = "children"
+            kind = "risky"
+            reason = "x"
+            match = { parent = "~", dir = true }
+            [[rule]]
+            id = "anywhere"
+            kind = "risky"
+            reason = "x"
+            match = { suffix = ".app" }
+        "#;
+        let policy = Policy::from_toml(src).unwrap();
+        let resolved = policy.resolve(&f.arena, &f.index, &ctx());
+        let scopes: Vec<Scope> = resolved.rules.iter().map(Compiled::scope).collect();
+        assert_eq!(scopes, [Scope::Node(f.id("/System")), Scope::Children(f.id("/Users/alex")), Scope::All]);
+    }
+}

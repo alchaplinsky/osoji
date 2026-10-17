@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { withItem } from "../lib/bin";
 import type { BinItem } from "../lib/types";
 
 export type Bin = {
@@ -12,12 +13,8 @@ export type Bin = {
   clear: () => void;
 };
 
-function withItem(items: BinItem[], item: BinItem): BinItem[] {
-  if (items.some((b) => b.id === item.id)) return items;
-  return items.filter((b) => !b.ancestors.includes(item.id)).concat(item);
-}
-
 // A queued ancestor covers its descendants, so reviews and totals never count the same bytes twice.
+// Protected items never enter the bin.
 export function useBin(): Bin {
   const [queued, setItems] = useState<BinItem[]>([]);
 

@@ -18,6 +18,7 @@ import { useTheme } from "./hooks/useTheme";
 import { useSettings } from "./hooks/useSettings";
 import { homeDir, nodeInfo, reveal, trashNodes, volumeInfo } from "./lib/api";
 import { humanBytes } from "./lib/format";
+import { reviewWarning } from "./lib/bin";
 import { expectedBytes } from "./lib/scanEstimate";
 import { useScanTotals } from "./hooks/useScanTotals";
 import { pathTo } from "./lib/tree";
@@ -148,6 +149,7 @@ export default function App() {
       size: node.size,
       dir: node.dir,
       ancestors: [...info.ancestors.map((a) => a.id), info.id, ...below.slice(0, -1).map((n) => n.id)],
+      guard: node.guard ?? null,
     };
   };
 
@@ -189,7 +191,7 @@ export default function App() {
   };
 
   const bigCount = confirmBig ? bin.items.filter((i) => i.size >= BIG_ITEM).length : 0;
-  const warning = bigCount > 0 ? `${bigCount === 1 ? "1 item is" : `${bigCount} items are`} over 1 GB. Double-check before you continue.` : undefined;
+  const warning = reviewWarning(bin.items, bigCount);
 
   const addWatcher = async () => {
     const dir = await open({ directory: true, multiple: false, defaultPath: home || scanRoot });

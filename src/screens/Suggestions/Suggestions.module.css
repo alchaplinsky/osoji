@@ -106,6 +106,13 @@
   min-width: 0;
 }
 
+.title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.title .name { min-width: 0; }
+
 .name,
 .path {
   display: block;

@@ -1,0 +1,9 @@
+[package]
+name = "scan-policy"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+scan-core = { path = "../scan-core" }
+serde = { version = "1", features = ["derive"] }
+toml = { version = "1", features = ["serde"] }
