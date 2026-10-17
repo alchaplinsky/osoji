@@ -1,6 +1,6 @@
 import type { DragEvent, MouseEventHandler } from "react";
 import type { ThemeName } from "../../../design/theme";
-import { hueAt, shade } from "../../../design/palette";
+import { tone } from "../../../design/palette";
 import { humanBytes } from "../../../lib/format";
 import type { Slice } from "../../../screens/Breakdown/slices";
 import { Mono, cx } from "../../ui";
@@ -57,7 +57,7 @@ export default function Tile({ slice, cell, theme, hovered, opacity, ...handlers
         <div
           key={k.child.id}
           className={styles.kid}
-          style={{ left: k.x + INSET, top: k.y + HEAD, width: k.w - 3, height: k.h - 3, background: shade(theme, hueAt(k.j), 2) }}
+          style={{ left: k.x + INSET, top: k.y + HEAD, width: k.w - 3, height: k.h - 3, background: tone(theme, k.j, 2) }}
         >
           {k.w >= 56 && k.h >= 20 && k.child.name}
         </div>

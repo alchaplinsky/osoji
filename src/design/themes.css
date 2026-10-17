@@ -8,6 +8,7 @@
   --card: #141416;
   --card2: #1C1C1F;
   --popover: #1C1C1F;
+  --sheet: #1C1C1F;
   --line: rgba(255, 255, 255, .08);
   --line2: rgba(255, 255, 255, .16);
   --fg: #F2EFE9;
@@ -38,6 +39,9 @@
   /* Floating surfaces (menus, toasts) sit over other content, so they need a
      near-opaque tinted fill; the translucent card tokens would let text bleed through. */
   --popover: rgba(30, 46, 66, .94);
+  /* Sheets keep the frosted look: a thicker tint than cards, and the sheet blurs what is
+     behind it hard enough that only a colour wash comes through. */
+  --sheet: rgba(38, 56, 80, .82);
   --line: rgba(255, 255, 255, .1);
   --line2: rgba(255, 255, 255, .2);
   --fg: #EDF3F8;
@@ -63,6 +67,7 @@
   --card: #FFFFFF;
   --card2: #F6F2EB;
   --popover: rgba(255, 255, 255, .94);
+  --sheet: #FFFFFF;
   --line: rgba(30, 24, 18, .08);
   --line2: rgba(30, 24, 18, .16);
   --fg: #1C1915;
