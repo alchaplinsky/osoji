@@ -37,3 +37,4 @@ export const reveal = (node: number) => invoke<void>("reveal", { node });
 export const trashNodes = (nodes: number[]) => invoke<TrashResult>("trash_nodes", { nodes });
 export const homeDir = () => invoke<string>("home_dir");
 export const volumeInfo = (path: string) => invoke<VolumeInfo>("volume_info", { path });
+export const volumes = () => invoke<VolumeInfo[]>("volumes");
