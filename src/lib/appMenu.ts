@@ -1,5 +1,5 @@
 // Native menu setup. We only customize one thing: a macOS-style "Check for
-// Updates…" item in the application submenu (right under "About Unshift"). Since
+// Updates…" item in the application submenu (right under "About Osoji"). Since
 // assigning a menu replaces the platform default wholesale, we start from that
 // default and insert into it rather than rebuilding every standard item.
 
@@ -20,7 +20,7 @@ export async function setupAppMenu(onCheck: () => void): Promise<void> {
     const separator = await PredefinedMenuItem.new({ item: "Separator" });
     const check = await MenuItem.new({ text: "Check for Updates…", action: onCheck });
 
-    // After "About Unshift" (index 0): About / --- / Check for Updates… / …
+    // After "About Osoji" (index 0): About / --- / Check for Updates… / …
     await appMenu.insert([separator, check], 1);
     await menu.setAsAppMenu();
   } catch (err) {

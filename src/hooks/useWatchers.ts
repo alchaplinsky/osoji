@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { watchStatus, type WatchHit } from "../lib/api";
 import type { Watcher, WatcherStatus } from "../lib/types";
 
-const STORAGE_KEY = "unshift.watchers";
+const STORAGE_KEY = "osoji.watchers";
 
 export const DEFAULT_WATCH_LIMIT = 10 * 2 ** 30;
 

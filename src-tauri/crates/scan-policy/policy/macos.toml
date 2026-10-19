@@ -275,7 +275,7 @@ match = { suffix = ".utm" }
 id = "keep-photos"
 kind = "cleanup"
 safety = "keep"
-reason = "Your photos. Unshift never suggests removing these."
+reason = "Your photos. Osoji never suggests removing these."
 match = { suffix = ".photoslibrary", dir = true }
 
 [[rule]]

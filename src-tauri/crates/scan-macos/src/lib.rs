@@ -459,7 +459,7 @@ mod tests {
     #[test]
     fn attributes_bytes_to_the_roots_direct_children() {
         // The walker opens with O_NOFOLLOW_ANY, and /var is a symlink, so resolve the temp dir first.
-        let root = fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("unshift-tops-{}", std::process::id()));
+        let root = fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("osoji-tops-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("a")).unwrap();
         fs::create_dir_all(root.join("b/deep")).unwrap();

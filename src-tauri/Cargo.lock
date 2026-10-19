@@ -2606,6 +2606,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "osoji-app"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "scan-core",
+ "scan-macos",
+ "scan-policy",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-process",
+ "tauri-plugin-updater",
+ "tauri-plugin-webdriver",
+ "trash",
+]
+
+[[package]]
 name = "pango"
 version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4609,28 +4631,6 @@ name = "unicode-segmentation"
 version = "1.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
-
-[[package]]
-name = "unshift-app"
-version = "0.1.0"
-dependencies = [
- "libc",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "scan-core",
- "scan-macos",
- "scan-policy",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-process",
- "tauri-plugin-updater",
- "tauri-plugin-webdriver",
- "trash",
-]
 
 [[package]]
 name = "untrusted"

@@ -23,8 +23,8 @@ export default function FdaBanner({ unreadable, onOpenSettings, onDismiss }: Fda
       }
       onDismiss={onDismiss}
     >
-      {folders} could not be read. Grant Unshift Full Disk Access to include Mail, Messages, Safari and other protected folders. You may
-      need to relaunch Unshift afterwards.
+      {folders} could not be read. Grant Osoji Full Disk Access to include Mail, Messages, Safari and other protected folders. You may
+      need to relaunch Osoji afterwards.
     </Banner>
   );
 }

@@ -1,4 +1,4 @@
-# unshift
+# osoji
 
 Open-source disk explorer and cleaner for macOS: a DaisyDisk-style sunburst
 on top of a scanner that walks 10M entries in about 30 s. See `docs/spec.md`

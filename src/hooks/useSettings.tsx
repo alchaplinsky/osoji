@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-const STORAGE_KEY = "unshift.settings";
+const STORAGE_KEY = "osoji.settings";
 
 type Settings = { confirmBig: boolean; watchers: boolean };
 type SettingsContextValue = Settings & { setConfirmBig: (v: boolean) => void; setWatchers: (v: boolean) => void };

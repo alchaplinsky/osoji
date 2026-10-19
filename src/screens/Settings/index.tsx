@@ -44,7 +44,7 @@ export default function SettingsScreen() {
             label="Move items to Trash instead of deleting"
             desc="Everything you sweep can be put back until you empty the Trash."
             checked
-            title="Unshift never deletes permanently"
+            title="Osoji never deletes permanently"
           />
           <SettingRow
             label="Ask before removing anything over 1 GB"
@@ -68,7 +68,7 @@ export default function SettingsScreen() {
             ))}
           </div>
         </div>
-        <div className={styles.footer}>Unshift {version}</div>
+        <div className={styles.footer}>Osoji {version}</div>
       </div>
     </section>
   );

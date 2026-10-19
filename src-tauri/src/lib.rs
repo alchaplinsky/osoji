@@ -22,7 +22,7 @@ struct Scan {
     arena: Arena,
     index: ChildIndex,
     hits: PolicyHits,
-    /// Bytes and items Unshift moved to the Trash since the scan, which the arena no longer counts.
+    /// Bytes and items Osoji moved to the Trash since the scan, which the arena no longer counts.
     swept: (u64, u32),
 }
 
@@ -486,7 +486,7 @@ fn collect_suggestions(policy: &Policy, scan: &Scan, ctx: &PolicyContext) -> Vec
             let (safety, reason) = match &entry.guard {
                 Some(g) if g.kind == Kind::Protected.as_str() => ("keep", g.reason.clone()),
                 _ if parent != NONE && !is_writable(&a.path(parent)) => {
-                    ("keep", "Protected by macOS and cannot be moved by Unshift.".to_string())
+                    ("keep", "Protected by macOS and cannot be moved by Osoji.".to_string())
                 }
                 _ => (policy.rule(rule).safety.unwrap_or(Safety::Review).as_str(), policy.reason_for(rule, a, id, ctx)),
             };
@@ -519,7 +519,7 @@ struct WatchHit {
     dir: bool,
 }
 
-/// Moved to the Trash by Unshift, or sitting in the Trash folder: either way not the user's to sort.
+/// Moved to the Trash by Osoji, or sitting in the Trash folder: either way not the user's to sort.
 const GONE: Flags = Flags::TRASHED.union(Flags::TRASH_FOLDER);
 
 /// True when `id` or one of its ancestors was moved to the Trash or is the Trash folder.
@@ -714,7 +714,7 @@ struct TrashInfo {
     items: u32,
 }
 
-/// The user's Trash folder as scanned, plus what Unshift moved there since. None when the scan does not cover it.
+/// The user's Trash folder as scanned, plus what Osoji moved there since. None when the scan does not cover it.
 fn trash_of(policy: &Policy, scan: &Scan) -> Option<TrashInfo> {
     let id = scan.hits.iter().filter(|&(_, rule)| policy.rule(rule).kind == Kind::Trash).map(|(id, _)| id).min()?;
     let a = &scan.arena;
@@ -1058,7 +1058,7 @@ mod tests {
     fn scans_a_root_reached_through_a_symlink() {
         use std::fs;
         // Not canonicalized: on macOS the temp dir itself sits under the /var symlink.
-        let base = std::env::temp_dir().join(format!("unshift-symroot-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("osoji-symroot-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(base.join("real/sub")).unwrap();
         fs::write(base.join("real/sub/f"), [0u8; 4096]).unwrap();
@@ -1082,7 +1082,7 @@ mod tests {
     #[test]
     fn rejects_missing_or_unreadable_roots() {
         use std::os::unix::fs::PermissionsExt;
-        let base = std::env::temp_dir().join(format!("unshift-badroot-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("osoji-badroot-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
 
@@ -1114,7 +1114,7 @@ mod tests {
     #[test]
     fn suggests_each_app_cache_but_not_the_caches_folder() {
         // Real directories, so the writability guard sees writable parents.
-        let base = std::env::temp_dir().join(format!("unshift-caches-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("osoji-caches-{}", std::process::id()));
         let home = base.join("home");
         std::fs::create_dir_all(home.join("Library/Caches")).unwrap();
         std::fs::create_dir_all(home.join("Library/Developer/CoreSimulator/Caches")).unwrap();
@@ -1163,13 +1163,13 @@ mod tests {
         assert!(by_name(&found, "folders").is_none());
         let docker = by_name(&found, "Docker.raw").expect("Docker.raw suggested");
         assert_eq!(docker.safety, "keep");
-        assert_eq!(docker.reason, "Protected by macOS and cannot be moved by Unshift.");
+        assert_eq!(docker.reason, "Protected by macOS and cannot be moved by Osoji.");
     }
 
     #[test]
     fn says_how_long_a_download_has_been_sitting_there() {
         const NOW: i64 = 1_700_000_000;
-        let base = std::env::temp_dir().join(format!("unshift-downloads-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("osoji-downloads-{}", std::process::id()));
         let home = base.join("home");
         std::fs::create_dir_all(home.join("Downloads")).unwrap();
 
@@ -1192,7 +1192,7 @@ mod tests {
 
     #[test]
     fn lists_a_folder_once_and_nothing_inside_it_or_inside_a_bundle() {
-        let base = std::env::temp_dir().join(format!("unshift-nested-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("osoji-nested-{}", std::process::id()));
         std::fs::create_dir_all(base.join("app")).unwrap();
 
         let mut a = Arena::default();

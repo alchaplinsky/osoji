@@ -12,12 +12,12 @@ lto = "thin"
 codegen-units = 1
 
 [package]
-name = "unshift-app"
+name = "osoji-app"
 edition.workspace = true
 version.workspace = true
 
 [lib]
-name = "unshift_lib"
+name = "osoji_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

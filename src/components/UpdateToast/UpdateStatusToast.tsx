@@ -5,7 +5,7 @@ import styles from "./UpdateToast.module.css";
 
 const STATUS_COPY: Record<UpdateCheckStatus, { icon: LucideIcon; title: string; detail: string }> = {
   checking: { icon: RefreshCw, title: "Checking for updates…", detail: "Contacting GitHub Releases." },
-  uptodate: { icon: Check, title: "You're up to date", detail: "Unshift is running the latest version." },
+  uptodate: { icon: Check, title: "You're up to date", detail: "Osoji is running the latest version." },
   error: { icon: X, title: "Update check failed", detail: "Couldn't reach GitHub Releases." },
 };
 
