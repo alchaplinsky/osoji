@@ -4,8 +4,9 @@ import type { HoverId } from "../../../lib/types";
 import { humanBytes } from "../../../lib/format";
 import { pathTo } from "../../../lib/tree";
 import { visibleSlices, type Slice } from "../../../screens/Breakdown/slices";
-import { relatedKeys, relatedOpacity } from "../../Sunburst/layout";
+import { binnedKeys, relatedKeys, relatedOpacity } from "../../Sunburst/layout";
 import { Mono, cx } from "../../ui";
+import { glass, tint } from "../glass";
 import { dragProps, pointerProps } from "../interact";
 import type { VizProps } from "../types";
 import InsideBar from "./InsideBar";
@@ -23,9 +24,10 @@ function focusOf(view: ViewNode, slices: Slice[], hoverId: HoverId): ViewNode | 
   return slices.find((s) => s.node?.dir)?.node ?? null;
 }
 
-export default function Shelf({ view, theme, hoverId, onHover, onDrill, onSelectFile, onDragStart, onContextMenu, className }: VizProps) {
+export default function Shelf({ view, theme, hoverId, onHover, onDrill, onSelectFile, onDragStart, onContextMenu, binIds, className }: VizProps) {
   const slices = useMemo(() => visibleSlices(view, theme), [view, theme]);
   const related = useMemo(() => relatedKeys(view, hoverId), [view, hoverId]);
+  const binned = useMemo(() => binnedKeys(view, binIds), [view, binIds]);
   const focus = focusOf(view, slices, hoverId);
   const actions = { onHover, onDrill, onSelectFile, onContextMenu };
 
@@ -38,8 +40,14 @@ export default function Shelf({ view, theme, hoverId, onHover, onDrill, onSelect
             return (
               <div
                 key={slice.key}
-                className={cx(styles.segment, !slice.node && styles.rest)}
-                style={{ width: `${pct}%`, background: slice.fill, opacity: relatedOpacity(related, slice.key) }}
+                className={cx(
+                  styles.segment,
+                  glass.piece,
+                  !slice.node && styles.rest,
+                  hoverId !== null && hoverId === slice.hover && cx(styles.lifted, glass.hovered),
+                  binned.has(slice.key) && glass.binned,
+                )}
+                style={tint(slice.fill, { width: `${pct}%`, opacity: relatedOpacity(related, slice.key) })}
                 {...pointerProps(slice.node, slice.hover, actions)}
                 {...dragProps(slice.node, onDragStart)}
               >
@@ -55,7 +63,7 @@ export default function Shelf({ view, theme, hoverId, onHover, onDrill, onSelect
         </div>
         <Legend slices={slices} actions={actions} />
       </div>
-      {focus && <InsideBar focus={focus} theme={theme} related={related} actions={actions} />}
+      {focus && <InsideBar focus={focus} theme={theme} hoverId={hoverId} related={related} binned={binned} actions={actions} />}
     </div>
   );
 }

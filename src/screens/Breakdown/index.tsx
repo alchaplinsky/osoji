@@ -101,6 +101,7 @@ export default function BreakdownScreen({
     onUp,
     onSelectFile: onToggleBin,
     onContextMenu: onItemMenu,
+    binIds,
     disk,
     centerSize: listOpen ? 20 : 24,
     className: STAGE_CLASS[viz],
