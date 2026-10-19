@@ -15,20 +15,40 @@
   overflow: visible;
 }
 
+.lens { stroke: var(--line); }
+
+/* Arcs lift away from the centre on hover: a scale about the middle of the chart. */
 .arc {
   fill-rule: evenodd;
-  transition: opacity .18s, fill .25s;
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+  transition: opacity .25s, transform .32s var(--ease-glide);
 }
 .node { cursor: pointer; }
+
+/* While zooming every frame sets the geometry and fades itself: no transitions to lag behind, and no glow to repaint. */
+.zooming .arc,
+.zooming .arc path {
+  transition: none;
+  filter: none;
+}
+.lifted { transform: scale(1.025); }
+
+.hidden { stroke: var(--line); }
 
 .free {
   fill: color-mix(in srgb, var(--fg) 4%, transparent);
   stroke: var(--line2);
   stroke-dasharray: 3 4;
+  transition: fill .32s var(--ease-glide), stroke .32s var(--ease-glide);
+}
+.lifted .free {
+  fill: color-mix(in srgb, var(--fg) 7%, transparent);
+  stroke: color-mix(in srgb, var(--fg) 24%, transparent);
 }
 
 .hole {
-  fill: var(--card);
+  fill: color-mix(in srgb, var(--fg) 3.5%, transparent);
   stroke: var(--line);
   cursor: pointer;
 }

@@ -9,16 +9,18 @@
 
 .tile {
   position: absolute;
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
-  padding: 9px 11px;
-  color: var(--tilefg);
+  padding: 8px 10px;
   cursor: default;
-  transition: opacity .25s, transform .35s var(--ease-spring);
 }
 .dir { cursor: pointer; }
 .file { cursor: grab; }
-.hovered { transform: scale(1.012); }
+.lifted { transform: scale(1.015); }
+
+/* While zooming every frame places and fades the tiles itself, and tiles sliding out are clipped at the edge. */
+.zooming { overflow: hidden; }
+.zooming .tile { transition: none; }
 
 /* Fixed line heights so the header's footprint matches HEAD in Tile.tsx, which places the children grid below it. */
 .name {
@@ -38,6 +40,7 @@
   opacity: .7;
 }
 
+/* Faint glass panes for what is inside the tile, in the tile's own ink. */
 .kid {
   position: absolute;
   border-radius: 6px;
@@ -45,7 +48,8 @@
   padding: 4px 7px;
   font-size: 10.5px;
   font-weight: 600;
-  color: var(--tilefg);
+  background: color-mix(in srgb, currentColor 7%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 10%, transparent);
   white-space: nowrap;
   text-overflow: ellipsis;
   pointer-events: none;

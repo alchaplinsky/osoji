@@ -1,30 +1,57 @@
 import { useMemo } from "react";
+import type { ThemeName } from "../../../design/theme";
+import type { ViewNode } from "../../../lib/api";
 import { useElementSize } from "../../../hooks/useElementSize";
 import { visibleSlices } from "../../../screens/Breakdown/slices";
-import { relatedKeys, relatedOpacity } from "../../Sunburst/layout";
+import { binnedKeys, relatedKeys, relatedOpacity } from "../../Sunburst/layout";
 import { cx } from "../../ui";
 import { dragProps, pointerProps } from "../interact";
 import type { VizProps } from "../types";
+import { cameraBox, nestBox, useZoom, type Box } from "../zoom";
 import { squarify } from "./squarify";
 import Tile from "./Tile";
 import styles from "./Treemap.module.css";
 
-export default function Treemap({ view, theme, hoverId, onHover, onDrill, onSelectFile, onDragStart, onContextMenu, className }: VizProps) {
+const cellsOf = (view: ViewNode, theme: ThemeName, box: Box) =>
+  squarify(visibleSlices(view, theme).map((slice) => ({ slice, value: slice.size })), box.x, box.y, box.w, box.h);
+
+export default function Treemap({ view, theme, hoverId, onHover, onDrill, onSelectFile, onDragStart, onContextMenu, binIds, className }: VizProps) {
   const [rootRef, size] = useElementSize<HTMLDivElement>();
-  const slices = useMemo(() => visibleSlices(view, theme), [view, theme]);
+  const whole = useMemo(() => ({ x: 0, y: 0, w: size.w, h: size.h }), [size]);
+  const cells = useMemo(() => cellsOf(view, theme, whole), [view, theme, whole]);
   const related = useMemo(() => relatedKeys(view, hoverId), [view, hoverId]);
-  const cells = useMemo(() => squarify(slices.map((slice) => ({ slice, value: slice.size })), 0, 0, size.w, size.h), [slices, size]);
+  const zoom = useZoom(view, null);
+  const { outer, inner, path } = zoom ?? {};
+  const binned = useMemo(() => binnedKeys(outer ?? view, binIds), [outer, view, binIds]);
+
+  // Both views laid out once per move: the outer one in the chart, the inner one inside the tile it zooms from.
+  const world = useMemo(() => {
+    if (!outer || !inner || !path) return null;
+    const outerCells = cellsOf(outer, theme, whole);
+    const focus = outerCells.find((c) => c.slice.key === path[1].id);
+    if (!focus) return null;
+    const innerCells = cellsOf(inner, theme, whole).map((c) => ({ ...c, ...nestBox(c, whole, focus) }));
+    return { outerCells, innerCells, focus };
+  }, [outer, inner, path, theme, whole]);
+
+  const tiles =
+    zoom && world
+      ? [
+          ...world.outerCells.map((c) => ({ ...c, ...cameraBox(c, whole, world.focus, zoom.p), fade: 1 - zoom.p })),
+          ...world.innerCells.map((c) => ({ ...c, ...cameraBox(c, whole, world.focus, zoom.p), fade: zoom.p })),
+        ]
+      : cells.map((c) => ({ ...c, fade: 1 }));
 
   return (
-    <div ref={rootRef} className={cx(styles.root, className)}>
-      {cells.map(({ slice, ...cell }) => (
+    <div ref={rootRef} className={cx(styles.root, zoom && styles.zooming, className)}>
+      {tiles.map(({ slice, fade, ...cell }) => (
         <Tile
           key={slice.key}
           slice={slice}
           cell={cell}
-          theme={theme}
           hovered={hoverId !== null && hoverId === slice.hover}
-          opacity={relatedOpacity(related, slice.key)}
+          binned={binned.has(slice.key)}
+          opacity={fade * relatedOpacity(related, slice.key)}
           {...pointerProps(slice.node, slice.hover, { onHover, onDrill, onSelectFile, onContextMenu })}
           {...dragProps(slice.node, onDragStart)}
         />

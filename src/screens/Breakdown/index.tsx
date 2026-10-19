@@ -1,11 +1,13 @@
-import { useMemo, type ComponentType, type MouseEvent, type ReactNode } from "react";
+import { useMemo, useRef, type ComponentType, type MouseEvent, type ReactNode } from "react";
 import type { ThemeName } from "../../design/theme";
 import type { NodeInfo, ViewNode } from "../../lib/api";
+import { isProtected } from "../../lib/bin";
+import { findNode } from "../../lib/tree";
 import type { BinItem, HoverId, Viz, Volume } from "../../lib/types";
 import Sunburst from "../../components/Sunburst";
 import { Orbit, Shelf, Treemap, type VizProps } from "../../components/viz";
 import { cx } from "../../components/ui";
-import BinBar from "./BinBar";
+import BinBar, { flyToBin } from "./BinBar";
 import BreakdownToolbar from "./BreakdownToolbar";
 import CapacityBar from "./CapacityBar";
 import HoverLabel from "./HoverLabel";
@@ -88,6 +90,12 @@ export default function BreakdownScreen({
   const ownIds = useMemo(() => new Set(binItems.map((item) => item.id)), [binItems]);
   const binIds = tickedIds ?? ownIds;
   const pending = binItems.reduce((sum, item) => sum + item.size, 0);
+  const binTarget = useRef<HTMLSpanElement>(null);
+  const selectFile = (id: number, source?: Element) => {
+    const node = findNode(view, id);
+    if (source && node && !binIds.has(id) && !isProtected(node)) flyToBin(source, binTarget.current);
+    onToggleBin(id);
+  };
   const View = VIEWS[viz];
   const rest = viz === "sunburst" ? undefined : visibleSlices(view, theme).find((s) => !s.node);
   // Only the sunburst spans the disk; the other charts show the scanned folder.
@@ -99,8 +107,9 @@ export default function BreakdownScreen({
     onHover,
     onDrill: onNavigate,
     onUp,
-    onSelectFile: onToggleBin,
+    onSelectFile: selectFile,
     onContextMenu: onItemMenu,
+    binIds,
     disk,
     centerSize: listOpen ? 20 : 24,
     className: STAGE_CLASS[viz],
@@ -134,6 +143,7 @@ export default function BreakdownScreen({
             }}
             onReview={onReview}
             wide={!listOpen}
+            targetRef={binTarget}
           />
         </div>
         <div className={styles.listSlot}>

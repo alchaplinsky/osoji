@@ -10,8 +10,10 @@ export function pointerProps(node: ViewNode | null, hover: HoverId, actions: Poi
   return {
     onMouseEnter: () => actions.onHover(hover),
     onMouseLeave: () => actions.onHover(null),
-    onClick: () => {
-      if (node) (node.dir ? actions.onDrill : actions.onSelectFile)(node.id);
+    onClick: (e: MouseEvent) => {
+      if (!node) return;
+      if (node.dir) actions.onDrill(node.id);
+      else actions.onSelectFile(node.id, e.currentTarget);
     },
     onContextMenu: (e: MouseEvent) => {
       if (node) actions.onContextMenu?.(e, node.id);

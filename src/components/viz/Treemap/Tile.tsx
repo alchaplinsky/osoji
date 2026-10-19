@@ -1,17 +1,17 @@
 import type { DragEvent, MouseEventHandler } from "react";
-import type { ThemeName } from "../../../design/theme";
-import { tone } from "../../../design/palette";
+import { isTrash } from "../../../lib/bin";
 import { humanBytes } from "../../../lib/format";
 import type { Slice } from "../../../screens/Breakdown/slices";
 import { Mono, cx } from "../../ui";
+import { glass, tint } from "../glass";
 import { squarify, type Rect } from "./squarify";
 import styles from "./Treemap.module.css";
 
 type TileProps = {
   slice: Slice;
   cell: Rect;
-  theme: ThemeName;
   hovered: boolean;
+  binned: boolean;
   opacity: number;
   onMouseEnter: MouseEventHandler;
   onMouseLeave: MouseEventHandler;
@@ -22,19 +22,21 @@ type TileProps = {
 };
 
 const KIDS = 8;
-/** Room above the children grid for the name and size lines (9px padding + 16px + 2px + 14px, plus a 9px gap). */
+/** Room above the children grid for the name and size lines (1px border + 8px padding + 16px + 2px + 14px, plus a 9px gap). */
 const HEAD = 50;
 /** Inset of the children grid from the tile's sides and bottom. */
 const INSET = 10;
+/** Space between neighbouring tiles. */
+const GAP = 6;
 
-export default function Tile({ slice, cell, theme, hovered, opacity, ...handlers }: TileProps) {
-  const w = cell.w - 4;
-  const h = cell.h - 4;
+export default function Tile({ slice, cell, hovered, binned, opacity, ...handlers }: TileProps) {
+  const w = cell.w - GAP;
+  const h = cell.h - GAP;
   const node = slice.node;
   const kids =
     node?.dir && w >= 140 && h >= HEAD + 60
       ? squarify(
-          node.children.slice(0, KIDS).map((child, j) => ({ child, j, value: child.size })),
+          node.children.slice(0, KIDS).map((child) => ({ child, value: child.size })),
           0,
           0,
           w - INSET * 2,
@@ -44,8 +46,8 @@ export default function Tile({ slice, cell, theme, hovered, opacity, ...handlers
 
   return (
     <div
-      className={cx(styles.tile, node && (node.dir ? styles.dir : styles.file), hovered && styles.hovered)}
-      style={{ left: cell.x + 2, top: cell.y + 2, width: w, height: h, background: slice.fill, opacity }}
+      className={cx(styles.tile, glass.piece, (!node || isTrash(node)) && glass.muted, node && (node.dir ? styles.dir : styles.file), hovered && cx(styles.lifted, glass.hovered), binned && glass.binned)}
+      style={tint(slice.fill, { left: cell.x + GAP / 2, top: cell.y + GAP / 2, width: w, height: h, opacity })}
       {...handlers}
     >
       {w >= 66 && h >= 36 && (
@@ -58,7 +60,7 @@ export default function Tile({ slice, cell, theme, hovered, opacity, ...handlers
         <div
           key={k.child.id}
           className={styles.kid}
-          style={{ left: k.x + INSET, top: k.y + HEAD, width: k.w - 3, height: k.h - 3, background: tone(theme, k.j, 2) }}
+          style={{ left: k.x + INSET, top: k.y + HEAD, width: k.w - 3, height: k.h - 3 }}
         >
           {k.w >= 56 && k.h >= 20 && k.child.name}
         </div>

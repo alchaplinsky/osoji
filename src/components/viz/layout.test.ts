@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { TAU, layoutArcs, relatedKeys } from "../Sunburst/layout";
 import { diskOf } from "../../screens/Breakdown/CapacityBar/capacity";
 import type { ViewNode } from "../../lib/api";
-import { neutral, tone } from "../../design/palette";
+import { STOPS, neutral, stopAt, tone } from "../../design/palette";
 import { slicesOf, visibleSlices } from "../../screens/Breakdown/slices";
 import { squarify } from "./Treemap/squarify";
 
@@ -29,7 +29,7 @@ describe("visualization layout", () => {
     for (const slices of [visibleSlices(view, "instrument"), slicesOf(view, "instrument")]) {
       expect(slices.map((slice) => slice.name)).toEqual(["Trash", "node-2"]);
       expect(slices[0].fill).toBe(neutral("instrument"));
-      expect(slices[1].fill).toBe(tone("instrument", 1));
+      expect(slices[1].fill).toBe(tone("instrument", 1, 2));
     }
   });
 
@@ -95,5 +95,15 @@ describe("visualization layout", () => {
 
   test("hovering free space relates only to itself", () => {
     expect(relatedKeys(node(0, 100, [node(1, 100)]), "free")).toEqual(new Set(["free"]));
+  });
+
+  test("colours siblings by size rank, largest coral to smallest green, without repeating", () => {
+    const view = node(0, 100, Array.from({ length: 9 }, (_, i) => node(i + 1, 20 - i)));
+    const fills = visibleSlices(view, "instrument").map((slice) => slice.fill);
+
+    expect(fills[0]).toBe(tone("instrument", 0, 9));
+    expect(stopAt(0)).toEqual(STOPS[0]);
+    expect(stopAt(1)).toEqual(STOPS.at(-1));
+    expect(new Set(fills).size).toBe(9);
   });
 });

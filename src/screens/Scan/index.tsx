@@ -77,7 +77,7 @@ function rankedTops(progress: ProgressMsg | null) {
  * capacity bar settles on. `shares` are each slot's share of the bar, already eased.
  */
 function segmentsOf(tops: ProgressMsg["tops"], shares: number[], restShare: number, theme: ThemeName): Segment[] {
-  const slots = tops.map((t, rank) => ({ key: rank, size: shares[rank] ?? 0, fill: tone(theme, rank), title: t.name }));
+  const slots = tops.map((t, rank) => ({ key: rank, size: shares[rank] ?? 0, fill: tone(theme, rank, tops.length), title: t.name }));
   return [...slots, { key: "rest", size: restShare, fill: neutral(theme), title: "Everything else" }];
 }
 
