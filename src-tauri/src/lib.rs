@@ -1,6 +1,7 @@
 //! Tauri backend: owns the scan state and exposes bounded views to the UI.
 //! The arena never crosses IPC; commands return only what is on screen.
 
+mod live;
 #[cfg(target_os = "macos")]
 mod zoom;
 
@@ -32,9 +33,11 @@ struct AppState {
     cancel: Mutex<Option<Arc<Cancel>>>,
     running: AtomicBool,
     policy: Policy,
-    /// Bumped each time `scan` is replaced, so a sweep can tell its arena went stale.
+    /// Bumped each time `scan` is replaced, so a sweep or a live update can tell its arena went stale.
     generation: AtomicU64,
     sweeping: AtomicBool,
+    /// Keeps `scan` current with the disk; replaced along with it.
+    watcher: Mutex<Option<scan_macos::Watcher>>,
 }
 
 /// Why the UI should treat a node with care: "trash", "protected", "risky" or "unexpected".
@@ -206,15 +209,18 @@ fn is_package(arena: &Arena, id: NodeId) -> bool {
 }
 
 /// Resolve an absolute path to a node of the scan, or NONE when it is outside the scan or missing.
+/// Detached nodes are skipped: a name that came back on disk is a different, live node.
 fn find_node(scan: &Scan, path: &Path) -> NodeId {
     use std::os::unix::ffi::OsStrExt;
     let Ok(rest) = path.strip_prefix(&scan.root) else {
         return NONE;
     };
+    let a = &scan.arena;
     let mut id: NodeId = 0;
     for part in rest.components() {
         let name = part.as_os_str().as_bytes();
-        match scan.index.children(id).iter().find(|&&c| scan.arena.name(c) == name) {
+        let live = |&&c: &&NodeId| a.name(c) == name && !a.flags[c as usize].intersects(DETACHED);
+        match scan.index.children(id).iter().find(live) {
             Some(&c) => id = c,
             None => return NONE,
         }
@@ -232,6 +238,7 @@ fn resolve_root(root: &str) -> Result<PathBuf, String> {
 
 #[tauri::command]
 async fn start_scan(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     root: String,
     threads: Option<usize>,
@@ -307,9 +314,19 @@ async fn start_scan(
         let index = ChildIndex::build(&arena);
         let ctx = PolicyContext { home: home_path(), now: unix_now() };
         let hits = state.policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
-        let mut slot = state.scan.lock().unwrap();
-        *slot = Some(Scan { root: cfg.root, arena, index, hits, swept: (0, 0) });
-        state.generation.fetch_add(1, Ordering::AcqRel);
+        {
+            let mut slot = state.scan.lock().unwrap();
+            *slot = Some(Scan { root: cfg.root.clone(), arena, index, hits, swept: (0, 0) });
+            state.generation.fetch_add(1, Ordering::AcqRel);
+        }
+        // Stop the old watcher before starting the next, so batches are only ever applied one at
+        // a time. Dropping joins its thread, which may be finishing a batch, so not on this one.
+        let old = state.watcher.lock().unwrap().take();
+        let _ = tauri::async_runtime::spawn_blocking(move || drop(old)).await;
+        let watcher = live::watch(app, &cfg.root)
+            .map_err(|e| eprintln!("watch {}: {e}; the scan will not follow changes", cfg.root.display()))
+            .ok();
+        *state.watcher.lock().unwrap() = watcher;
     }
     Ok(summary)
 }
@@ -352,7 +369,7 @@ fn build_view(policy: &Policy, scan: &Scan, id: NodeId, depth: u8, top_k: usize,
     }
     for &c in scan.index.children(id) {
         let ci = c as usize;
-        if a.flags[ci].contains(Flags::TRASHED) {
+        if a.flags[ci].intersects(DETACHED) {
             continue;
         }
         if node.children.len() < top_k && a.size[ci] >= min_size {
@@ -400,7 +417,8 @@ fn node_info(state: State<'_, AppState>, node: NodeId) -> Result<NodeInfo, Strin
         items: a.items[node as usize],
         dir: f.contains(Flags::DIR),
         error: f.contains(Flags::ERROR),
-        trashed: f.contains(Flags::TRASHED),
+        // The UI treats both the same: the node is no longer on disk where the scan saw it.
+        trashed: f.intersects(DETACHED),
         mtime: a.mtime[node as usize],
         ancestors,
         guard: guard_of(&state.policy, scan, node),
@@ -519,10 +537,13 @@ struct WatchHit {
     dir: bool,
 }
 
-/// Moved to the Trash by Osoji, or sitting in the Trash folder: either way not the user's to sort.
-const GONE: Flags = Flags::TRASHED.union(Flags::TRASH_FOLDER);
+/// No longer counted in the tree: moved to the Trash by Osoji, or vanished from disk on its own.
+const DETACHED: Flags = Flags::TRASHED.union(Flags::REMOVED);
 
-/// True when `id` or one of its ancestors was moved to the Trash or is the Trash folder.
+/// Detached, or sitting in the Trash folder: either way not the user's to sort.
+const GONE: Flags = DETACHED.union(Flags::TRASH_FOLDER);
+
+/// True when `id` or one of its ancestors is detached or is the Trash folder.
 fn gone_or_in_trash(a: &Arena, mut id: NodeId) -> bool {
     while id != NONE {
         if a.flags[id as usize].intersects(GONE) {
@@ -919,6 +940,20 @@ mod tests {
         assert!(gone_or_in_trash(&scan.arena, file));
         assert_eq!(scan.arena.size[0], 0);
         assert_eq!(scan.arena.items[0], 0);
+    }
+
+    #[test]
+    fn hides_nodes_removed_from_disk_like_trashed_ones() {
+        let (mut scan, folder, file) = scan_fixture();
+        scan.arena.mark_removed(file);
+        let policy = Policy::default();
+
+        assert!(gone_or_in_trash(&scan.arena, file));
+        let view = build_view(&policy, &scan, folder, 1, 10, 1);
+        assert!(view.children.is_empty() && view.other_count == 0);
+        assert!(largest(&policy, &scan, 10).is_empty());
+        assert!(plan_sweep(&policy, &scan, vec![file]).unwrap().0.is_empty());
+        assert_eq!(find_node(&scan, Path::new("/tmp/root/folder/file.bin")), NONE);
     }
 
     const TRASH_POLICY: &str = r#"

@@ -18,7 +18,7 @@ pub struct DirEntry {
     pub name: Vec<u8>,
     pub size: u64,
     pub mtime: i64,
-    /// `DIR`, `SYMLINK` and `ERROR` as the walkers would set them; policy flags are never set here.
+    /// `DIR`, `SYMLINK`, `MOUNT` and `ERROR` as the walkers would set them; policy flags are never set here.
     pub flags: Flags,
 }
 
@@ -42,7 +42,7 @@ const GONE: Flags = Flags::TRASHED.union(Flags::REMOVED);
 
 /// A node under a trashed or removed ancestor no longer counts toward the root, so
 /// updating it would take its bytes off the ancestors a second time.
-fn is_gone(arena: &Arena, mut id: NodeId) -> bool {
+pub fn is_gone(arena: &Arena, mut id: NodeId) -> bool {
     while id != NONE {
         if arena.flags[id as usize].intersects(GONE) {
             return true;

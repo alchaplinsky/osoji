@@ -456,9 +456,10 @@ fn process_dir(
 }
 
 /// Lists one directory the way the walker records it: allocated sizes, directories at 0,
-/// symlinks not followed. Hard links are not deduplicated; a live listing has no scan-wide
-/// view of which link was seen first, so each counts as an ordinary file. Like the walker,
-/// fails if any component of `path` is a symlink, so pass canonical paths.
+/// symlinks not followed, mount points flagged `MOUNT`. Hard links are not deduplicated; a
+/// live listing has no scan-wide view of which link was seen first, so each counts as an
+/// ordinary file. Like the walker, fails if any component of `path` is a symlink, so pass
+/// canonical paths.
 pub fn list_dir(path: &Path) -> io::Result<Vec<DirEntry>> {
     let cpath = CString::new(path.as_os_str().as_bytes()).map_err(|_| io::Error::other("NUL in path"))?;
     let fd = open_dir(&cpath);
@@ -481,6 +482,9 @@ pub fn list_dir(path: &Path) -> io::Result<Vec<DirEntry>> {
                 VDIR => {
                     flags |= Flags::DIR;
                     size = 0;
+                    if r.mountstatus & DIR_MNTSTATUS_MNTPOINT != 0 {
+                        flags |= Flags::MOUNT;
+                    }
                 }
                 VLNK => flags |= Flags::SYMLINK,
                 _ => {}
