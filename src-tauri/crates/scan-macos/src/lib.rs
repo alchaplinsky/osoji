@@ -10,7 +10,7 @@ pub use watch::{Batch, Watcher};
 
 use crossbeam_deque::{Injector, Stealer, Worker};
 use scan_core::live::DirEntry;
-use scan_core::{Arena, Cancel, Flags, HardlinkSet, Progress, ScanConfig, NodeId, NONE};
+use scan_core::{Arena, Cancel, Flags, HardlinkSet, NodeId, Progress, ScanConfig, NONE};
 use std::ffi::{CStr, CString};
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -118,11 +118,15 @@ struct Entry {
     mtime: i64,
     flags: Flags,
     top: u32,
+    dev: u32,
+    ino: u64,
+    /// (dev, ino) of a regular file with nlink > 1, recorded once its id is known.
+    link: Option<(u64, u64)>,
 }
 
 struct Shared<'a> {
     arena: Mutex<Arena>,
-    links: HardlinkSet,
+    links: &'a HardlinkSet,
     progress: &'a Progress,
     injector: Injector<Task>,
     stealers: Vec<Stealer<Task>>,
@@ -240,7 +244,8 @@ fn open_dir(path: &CStr) -> libc::c_int {
     unsafe { libc::open(path.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | O_NOFOLLOW_ANY | libc::O_CLOEXEC) }
 }
 
-pub fn walk(cfg: &ScanConfig, progress: &Progress, cancel: &Cancel) -> io::Result<Arena> {
+/// `links` collects the hard-link registry for the scan; pass a fresh set per walk.
+pub fn walk(cfg: &ScanConfig, progress: &Progress, cancel: &Cancel, links: &HardlinkSet) -> io::Result<Arena> {
     let mut arena = Arena::with_capacity(1 << 20, 16 << 20);
     let root = arena.push(NONE, cfg.root.as_os_str().as_bytes(), 0, 0, Flags::DIR);
     let root_path = CString::new(cfg.root.as_os_str().as_bytes()).map_err(|_| io::Error::other("NUL in path"))?;
@@ -248,7 +253,7 @@ pub fn walk(cfg: &ScanConfig, progress: &Progress, cancel: &Cancel) -> io::Resul
     let workers: Vec<Worker<Task>> = (0..cfg.threads).map(|_| Worker::new_lifo()).collect();
     let shared = Shared {
         arena: Mutex::new(arena),
-        links: HardlinkSet::default(),
+        links,
         progress,
         injector: Injector::new(),
         stealers: workers.iter().map(|w| w.stealer()).collect(),
@@ -364,6 +369,7 @@ fn process_dir(
 
             let mut flags = Flags::empty();
             let mut size = allocsize;
+            let mut link = None;
             if entry_err != 0 {
                 flags |= Flags::ERROR;
                 errors += 1;
@@ -392,9 +398,12 @@ fn process_dir(
                 }
                 VREG => {
                     files += 1;
-                    if nlink > 1 && shared.links.is_dup(devid, fileid) {
-                        flags |= Flags::HARDLINK_DUP;
-                        size = 0;
+                    if nlink > 1 {
+                        link = Some((devid, fileid));
+                        if shared.links.is_dup(devid, fileid) {
+                            flags |= Flags::HARDLINK_DUP;
+                            size = 0;
+                        }
                     }
                 }
                 _ => files += 1,
@@ -416,6 +425,9 @@ fn process_dir(
                 mtime,
                 flags,
                 top,
+                dev: devid as u32,
+                ino: fileid,
+                link,
             });
             names.extend_from_slice(name);
         }
@@ -432,10 +444,17 @@ fn process_dir(
         for e in entries.iter() {
             let off = e.name_off as usize;
             let name = &names[off..off + e.name_len as usize];
-            arena.push(task.id, name, e.size, e.mtime, e.flags);
+            let id = arena.push(task.id, name, e.size, e.mtime, e.flags) as usize;
+            arena.dev[id] = e.dev;
+            arena.ino[id] = e.ino;
         }
         first
     };
+    for (i, e) in entries.iter().enumerate() {
+        if let Some((dev, ino)) = e.link {
+            shared.links.record(dev, ino, first_id + i as NodeId, !e.flags.contains(Flags::HARDLINK_DUP));
+        }
+    }
     shared.progress.add(files, dirs, bytes, errors);
 
     if !subdirs.is_empty() {
@@ -493,7 +512,15 @@ pub fn list_dir(path: &Path) -> io::Result<Vec<DirEntry>> {
                 flags |= Flags::ERROR;
                 size = 0;
             }
-            out.push(DirEntry { name: r.name.to_vec(), size, mtime: r.mtime, flags });
+            out.push(DirEntry {
+                name: r.name.to_vec(),
+                size,
+                mtime: r.mtime,
+                flags,
+                dev: r.devid,
+                ino: r.fileid,
+                nlink: r.nlink,
+            });
         }
     }
     Ok(out)
@@ -573,7 +600,7 @@ mod tests {
 
         let cfg = ScanConfig { root: root.clone(), threads: 2, cross_mounts: false, qos: false };
         let progress = Progress::default();
-        let arena = walk(&cfg, &progress, &Cancel::new(false)).unwrap();
+        let arena = walk(&cfg, &progress, &Cancel::new(false), &HardlinkSet::default()).unwrap();
 
         let mut tops = progress.tops();
         tops.sort();
@@ -599,7 +626,7 @@ mod tests {
         std::os::unix::fs::symlink("sub", root.join("sym")).unwrap();
 
         let cfg = ScanConfig { root: root.clone(), threads: 2, cross_mounts: false, qos: false };
-        let arena = walk(&cfg, &Progress::default(), &Cancel::new(false)).unwrap();
+        let arena = walk(&cfg, &Progress::default(), &Cancel::new(false), &HardlinkSet::default()).unwrap();
         let walked: BTreeMap<Vec<u8>, (u64, i64, Flags)> = arena
             .children(0)
             .map(|id| {
@@ -623,6 +650,17 @@ mod tests {
                 assert_eq!(&l, w, "{}", String::from_utf8_lossy(name));
             }
         }
+        let walked_ids: BTreeMap<Vec<u8>, (u32, u64)> = arena
+            .children(0)
+            .map(|id| (arena.name(id).to_vec(), (arena.dev[id as usize], arena.ino[id as usize])))
+            .collect();
+        // The arena keeps dev as u32, the listing as u64.
+        let listed_ids: BTreeMap<Vec<u8>, (u32, u64)> =
+            list_dir(&root).unwrap().into_iter().map(|e| (e.name, (e.dev as u32, e.ino))).collect();
+        assert_eq!(listed_ids, walked_ids);
+        assert!(walked_ids.values().all(|&(_, ino)| ino != 0));
+        assert_eq!(walked_ids[&b"big"[..]], walked_ids[&b"big-link"[..]]);
+
         assert!(listed[&b"big"[..]].0 >= 100_000);
         assert!(listed[&b"sub"[..]].2.contains(Flags::DIR));
         assert!(listed[&b"sym"[..]].2.contains(Flags::SYMLINK));

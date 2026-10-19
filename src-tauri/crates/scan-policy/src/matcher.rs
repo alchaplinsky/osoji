@@ -2,6 +2,7 @@ use crate::lookup::{expand, find_node};
 use crate::schema::{Kind, Rule};
 use scan_core::{Arena, ChildIndex, Flags, NodeId, NONE};
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 const DAY: i64 = 86_400;
@@ -77,6 +78,14 @@ impl PolicyHits {
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
     }
+
+    /// Merge hits from a later `stamp_from`. A node already here keeps its rule: `stamp_from` tests
+    /// old nodes against pinned rules only, so it may pick a weaker one for them.
+    pub fn extend(&mut self, other: PolicyHits) {
+        for (id, rule) in other.rules {
+            self.rules.entry(id).or_insert(rule);
+        }
+    }
 }
 
 fn flag_of(kind: Kind) -> Flags {
@@ -120,7 +129,13 @@ fn resolve_under(arena: &Arena, index: &ChildIndex, home: &Path, under: &Option<
     }
 }
 
-fn compile<'a>(idx: usize, rule: &'a Rule, arena: &Arena, index: &ChildIndex, ctx: &PolicyContext) -> Option<Compiled<'a>> {
+fn compile<'a>(
+    idx: usize,
+    rule: &'a Rule,
+    arena: &Arena,
+    index: &ChildIndex,
+    ctx: &PolicyContext,
+) -> Option<Compiled<'a>> {
     let m = &rule.matcher;
     let at = |p| resolve_path(arena, index, &ctx.home, p).ok();
     Some(Compiled {
@@ -204,9 +219,15 @@ impl<'a> Resolved<'a> {
     }
 
     /// Call `hit(node, rule)` for every match of the rules `want` selects. Rules pinned to a path or a
-    /// parent test only those nodes; the rest share one pass over the arena.
-    fn each_match(&self, arena: &Arena, want: impl Fn(Kind) -> bool, mut hit: impl FnMut(NodeId, usize, Kind)) {
-        let mut sweep = Vec::new();
+    /// parent test only those nodes; the rest share one pass over the `sweep` ids.
+    fn each_match(
+        &self,
+        arena: &Arena,
+        sweep: Range<NodeId>,
+        want: impl Fn(Kind) -> bool,
+        mut hit: impl FnMut(NodeId, usize, Kind),
+    ) {
+        let mut swept = Vec::new();
         for r in self.rules.iter().filter(|r| want(r.kind)) {
             match r.scope() {
                 Scope::Node(n) => {
@@ -221,14 +242,14 @@ impl<'a> Resolved<'a> {
                         }
                     }
                 }
-                Scope::All => sweep.push(r),
+                Scope::All => swept.push(r),
             }
         }
-        if sweep.is_empty() {
+        if swept.is_empty() {
             return;
         }
-        for id in 0..arena.len() as NodeId {
-            for r in &sweep {
+        for id in sweep {
+            for r in &swept {
                 if self.matches(r, arena, id) {
                     hit(id, r.rule, r.kind);
                 }
@@ -240,15 +261,28 @@ impl<'a> Resolved<'a> {
     /// strongest rule (trash over protected over risky over unexpected, then the earliest in the file).
     /// A trash rule also sets PROTECTED: the Trash itself is never swept.
     pub fn stamp(&self, arena: &mut Arena) -> PolicyHits {
+        self.stamp_from(arena, 0)
+    }
+
+    /// `stamp` for nodes appended since the last one, which always have the largest ids: rules that
+    /// can match anywhere test only ids from `from` on, rules pinned to a path or a parent test their
+    /// nodes as usual (a recreated pinned path is a new node). Resolve against an index that holds the
+    /// new nodes.
+    pub fn stamp_from(&self, arena: &mut Arena, from: NodeId) -> PolicyHits {
         let mut found: HashMap<NodeId, (usize, Kind, Flags)> = HashMap::new();
-        self.each_match(arena, |k| k != Kind::Cleanup, |id, rule, kind| {
-            let entry = found.entry(id).or_insert((rule, kind, Flags::empty()));
-            entry.2 |= flag_of(kind);
-            let (best, best_kind) = (entry.0, entry.1);
-            if (severity(kind), std::cmp::Reverse(rule)) > (severity(best_kind), std::cmp::Reverse(best)) {
-                (entry.0, entry.1) = (rule, kind);
-            }
-        });
+        self.each_match(
+            arena,
+            from..arena.len() as NodeId,
+            |k| k != Kind::Cleanup,
+            |id, rule, kind| {
+                let entry = found.entry(id).or_insert((rule, kind, Flags::empty()));
+                entry.2 |= flag_of(kind);
+                let (best, best_kind) = (entry.0, entry.1);
+                if (severity(kind), std::cmp::Reverse(rule)) > (severity(best_kind), std::cmp::Reverse(best)) {
+                    (entry.0, entry.1) = (rule, kind);
+                }
+            },
+        );
         let mut hits = PolicyHits { rules: HashMap::with_capacity(found.len()) };
         for (id, (rule, _, flags)) in found {
             arena.flags[id as usize] |= flags;
@@ -261,12 +295,17 @@ impl<'a> Resolved<'a> {
     /// Nested matches are all reported; callers decide whether a match covers its descendants.
     pub fn cleanup_matches(&self, arena: &Arena) -> Vec<(NodeId, usize)> {
         let mut found: HashMap<NodeId, usize> = HashMap::new();
-        self.each_match(arena, |k| k == Kind::Cleanup, |id, rule, _| {
-            if !arena.flags[id as usize].contains(Flags::TRASHED) {
-                let best = found.entry(id).or_insert(rule);
-                *best = (*best).min(rule);
-            }
-        });
+        self.each_match(
+            arena,
+            0..arena.len() as NodeId,
+            |k| k == Kind::Cleanup,
+            |id, rule, _| {
+                if !arena.flags[id as usize].contains(Flags::TRASHED) {
+                    let best = found.entry(id).or_insert(rule);
+                    *best = (*best).min(rule);
+                }
+            },
+        );
         let mut out: Vec<_> = found.into_iter().collect();
         out.sort_unstable();
         out

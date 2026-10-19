@@ -42,6 +42,10 @@ pub struct Arena {
     pub items: Vec<u32>,
     pub flags: Vec<Flags>,
     pub mtime: Vec<i64>,
+    /// Device and inode, so live updates can tell a new hard link to a scanned file from a new
+    /// file. 0 when a walker did not record them.
+    pub dev: Vec<u32>,
+    pub ino: Vec<u64>,
     pub name_off: Vec<u32>,
     pub name_len: Vec<u16>,
     pub names: Vec<u8>,
@@ -55,6 +59,8 @@ impl Arena {
             items: Vec::with_capacity(nodes),
             flags: Vec::with_capacity(nodes),
             mtime: Vec::with_capacity(nodes),
+            dev: Vec::with_capacity(nodes),
+            ino: Vec::with_capacity(nodes),
             name_off: Vec::with_capacity(nodes),
             name_len: Vec::with_capacity(nodes),
             names: Vec::with_capacity(name_bytes),
@@ -76,6 +82,8 @@ impl Arena {
         self.items.push(0);
         self.flags.push(flags);
         self.mtime.push(mtime);
+        self.dev.push(0);
+        self.ino.push(0);
         self.name_off.push(self.names.len() as u32);
         self.name_len.push(name.len().min(u16::MAX as usize) as u16);
         self.names.extend_from_slice(name);
@@ -178,6 +186,8 @@ impl Arena {
             let parent = if p == 0 { under } else { base + p };
             let id = self.push(parent, sub.name(j as NodeId), sub.size[j], sub.mtime[j], sub.flags[j]);
             self.items[id as usize] = sub.items[j];
+            self.dev[id as usize] = sub.dev[j];
+            self.ino[id as usize] = sub.ino[j];
         }
         self.bump(under, sub.size[0] as i64, i64::from(sub.items[0]));
     }
@@ -243,14 +253,28 @@ impl ChildIndex {
 /// Shared cancel flag for a running scan.
 pub type Cancel = AtomicBool;
 
-/// First occurrence of a (dev, ino) with nlink > 1 counts; later ones are dups.
+/// First occurrence of a (dev, ino) with nlink > 1 counts; later ones are dups. Walkers ask
+/// `is_dup` as they read entries and `record` the node once its id is known, so the scan keeps
+/// a `live::Hardlinks` registry for updating link sets later.
 #[derive(Default)]
-pub struct HardlinkSet(Mutex<HashSet<(u64, u64)>>);
+pub struct HardlinkSet {
+    seen: Mutex<HashSet<(u64, u64)>>,
+    links: Mutex<live::Hardlinks>,
+}
 
 impl HardlinkSet {
     /// Returns true if this inode was already seen.
     pub fn is_dup(&self, dev: u64, ino: u64) -> bool {
-        !self.0.lock().unwrap().insert((dev, ino))
+        !self.seen.lock().unwrap().insert((dev, ino))
+    }
+
+    /// Remember which node holds this inode. `counted` is the negation of what `is_dup` answered.
+    pub fn record(&self, dev: u64, ino: u64, id: NodeId, counted: bool) {
+        self.links.lock().unwrap().add(dev, ino, id, counted);
+    }
+
+    pub fn finish(self) -> live::Hardlinks {
+        self.links.into_inner().unwrap()
     }
 }
 
