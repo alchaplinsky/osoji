@@ -78,15 +78,11 @@ impl PolicyHits {
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
     }
-
-    /// Merge hits from a later `stamp_from`. A node already here keeps its rule: `stamp_from` tests
-    /// old nodes against pinned rules only, so it may pick a weaker one for them.
-    pub fn extend(&mut self, other: PolicyHits) {
-        for (id, rule) in other.rules {
-            self.rules.entry(id).or_insert(rule);
-        }
-    }
 }
+
+/// Every flag `stamp` sets, which `stamp_ids` clears before evaluating a node again.
+pub const POLICY_FLAGS: Flags =
+    Flags::TRASH_FOLDER.union(Flags::PROTECTED).union(Flags::RISKY).union(Flags::UNEXPECTED);
 
 fn flag_of(kind: Kind) -> Flags {
     match kind {
@@ -105,6 +101,18 @@ fn severity(kind: Kind) -> u8 {
         Kind::Risky => 2,
         Kind::Unexpected => 1,
         Kind::Cleanup => 0,
+    }
+}
+
+/// A node's verdict so far: the strongest matching rule, its kind, and every matching rule's flags.
+type Verdict = (usize, Kind, Flags);
+
+/// Fold one more matching rule into a verdict: trash over protected over risky over unexpected,
+/// then the earliest in the file.
+fn fold(v: &mut Verdict, rule: usize, kind: Kind) {
+    v.2 |= flag_of(kind);
+    if (severity(kind), std::cmp::Reverse(rule)) > (severity(v.1), std::cmp::Reverse(v.0)) {
+        (v.0, v.1) = (rule, kind);
     }
 }
 
@@ -261,27 +269,12 @@ impl<'a> Resolved<'a> {
     /// strongest rule (trash over protected over risky over unexpected, then the earliest in the file).
     /// A trash rule also sets PROTECTED: the Trash itself is never swept.
     pub fn stamp(&self, arena: &mut Arena) -> PolicyHits {
-        self.stamp_from(arena, 0)
-    }
-
-    /// `stamp` for nodes appended since the last one, which always have the largest ids: rules that
-    /// can match anywhere test only ids from `from` on, rules pinned to a path or a parent test their
-    /// nodes as usual (a recreated pinned path is a new node). Resolve against an index that holds the
-    /// new nodes.
-    pub fn stamp_from(&self, arena: &mut Arena, from: NodeId) -> PolicyHits {
-        let mut found: HashMap<NodeId, (usize, Kind, Flags)> = HashMap::new();
+        let mut found: HashMap<NodeId, Verdict> = HashMap::new();
         self.each_match(
             arena,
-            from..arena.len() as NodeId,
+            0..arena.len() as NodeId,
             |k| k != Kind::Cleanup,
-            |id, rule, kind| {
-                let entry = found.entry(id).or_insert((rule, kind, Flags::empty()));
-                entry.2 |= flag_of(kind);
-                let (best, best_kind) = (entry.0, entry.1);
-                if (severity(kind), std::cmp::Reverse(rule)) > (severity(best_kind), std::cmp::Reverse(best)) {
-                    (entry.0, entry.1) = (rule, kind);
-                }
-            },
+            |id, rule, kind| fold(found.entry(id).or_insert((rule, kind, Flags::empty())), rule, kind),
         );
         let mut hits = PolicyHits { rules: HashMap::with_capacity(found.len()) };
         for (id, (rule, _, flags)) in found {
@@ -289,6 +282,25 @@ impl<'a> Resolved<'a> {
             hits.rules.insert(id, rule);
         }
         hits
+    }
+
+    /// `stamp` again for nodes a live update touched, added or recreated: size and mtime rules
+    /// may now hold or no longer hold, so each node loses its policy flags and hit and is tested
+    /// against every rule. Resolve against an index that holds new nodes, so a recreated pinned
+    /// path resolves to its new id.
+    pub fn stamp_ids(&self, arena: &mut Arena, ids: impl IntoIterator<Item = NodeId>, hits: &mut PolicyHits) {
+        for id in ids {
+            arena.flags[id as usize].remove(POLICY_FLAGS);
+            hits.rules.remove(&id);
+            let mut verdict: Option<Verdict> = None;
+            for r in self.rules.iter().filter(|r| r.kind != Kind::Cleanup && self.matches(r, arena, id)) {
+                fold(verdict.get_or_insert((r.rule, r.kind, Flags::empty())), r.rule, r.kind);
+            }
+            if let Some((rule, _, flags)) = verdict {
+                arena.flags[id as usize] |= flags;
+                hits.rules.insert(id, rule);
+            }
+        }
     }
 
     /// Every node a cleanup rule matches, with the first matching rule, ordered by node id.
