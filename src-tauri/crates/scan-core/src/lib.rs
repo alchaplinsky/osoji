@@ -243,14 +243,28 @@ impl ChildIndex {
 /// Shared cancel flag for a running scan.
 pub type Cancel = AtomicBool;
 
-/// First occurrence of a (dev, ino) with nlink > 1 counts; later ones are dups.
+/// First occurrence of a (dev, ino) with nlink > 1 counts; later ones are dups. Walkers ask
+/// `is_dup` as they read entries and `record` the node once its id is known, so the scan keeps
+/// a `live::Hardlinks` registry for updating link sets later.
 #[derive(Default)]
-pub struct HardlinkSet(Mutex<HashSet<(u64, u64)>>);
+pub struct HardlinkSet {
+    seen: Mutex<HashSet<(u64, u64)>>,
+    links: Mutex<live::Hardlinks>,
+}
 
 impl HardlinkSet {
     /// Returns true if this inode was already seen.
     pub fn is_dup(&self, dev: u64, ino: u64) -> bool {
-        !self.0.lock().unwrap().insert((dev, ino))
+        !self.seen.lock().unwrap().insert((dev, ino))
+    }
+
+    /// Remember which node holds this inode. `counted` is the negation of what `is_dup` answered.
+    pub fn record(&self, dev: u64, ino: u64, id: NodeId, counted: bool) {
+        self.links.lock().unwrap().add(dev, ino, id, counted);
+    }
+
+    pub fn finish(self) -> live::Hardlinks {
+        self.links.into_inner().unwrap()
     }
 }
 
