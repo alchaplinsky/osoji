@@ -57,13 +57,11 @@
 }
 
 /* Chart pieces are glass tinted by their own `--seg` colour: `--glass-hi`/`--glass-lo` are its share at the
-   top and bottom of a tile's gradient (flat pieces use `--glass-hi`), `--glass-glow` the share in its halo. */
+   top and bottom of a tile's gradient (flat pieces use `--glass-hi`), `--glass-glow` the share in its halo.
+   Hover keeps the fill and adds lift, glow and a brighter edge; the other pieces dim. */
 :root, [data-theme="instrument"], [data-theme="glass"] {
-  --seg-fg: var(--fg);
-  --glass-hi: 60%;
-  --glass-lo: 36%;
-  --glass-hover-hi: 90%;
-  --glass-hover-lo: 72%;
+  --glass-hi: 90%;
+  --glass-lo: 72%;
   --glass-edge: rgba(255, 255, 255, .12);
   --glass-edge-hover: rgba(255, 255, 255, .32);
   --glass-gloss: rgba(255, 255, 255, .16);
@@ -92,11 +90,8 @@
   --acsoft: rgba(232, 96, 60, .14);
   --blur: 20px;
   --shadow: 0 10px 30px rgba(40, 30, 20, .08), 0 1px 2px rgba(40, 30, 20, .05);
-  --seg-fg: #2A1510;
-  --glass-hi: 86%;
-  --glass-lo: 70%;
-  --glass-hover-hi: 100%;
-  --glass-hover-lo: 90%;
+  --glass-hi: 100%;
+  --glass-lo: 90%;
   --glass-edge: rgba(30, 24, 18, .1);
   --glass-edge-hover: rgba(30, 24, 18, .24);
   --glass-gloss: rgba(255, 255, 255, .4);
