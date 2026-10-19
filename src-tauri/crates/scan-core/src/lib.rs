@@ -2,6 +2,7 @@
 //! counters, and the jwalk reference walker (milestone M1).
 
 pub mod jwalk_walker;
+pub mod live;
 
 use bitflags::bitflags;
 use std::collections::HashSet;
@@ -27,6 +28,8 @@ bitflags! {
         const UNEXPECTED = 512;
         /// The user's Trash folder: real space, but never swept and never suggested.
         const TRASH_FOLDER = 1024;
+        /// Disappeared from disk since the scan, seen by the watcher.
+        const REMOVED = 2048;
     }
 }
 
@@ -122,26 +125,77 @@ impl Arena {
     /// Mark a node as moved to the Trash: zero its size, subtract it along the
     /// parent chain, and flag it. Returns the bytes removed from the tree.
     pub fn mark_trashed(&mut self, id: NodeId) -> u64 {
+        self.detach(id, Flags::TRASHED)
+    }
+
+    /// Like `mark_trashed`, for a node that vanished from disk on its own.
+    pub fn mark_removed(&mut self, id: NodeId) -> u64 {
+        self.detach(id, Flags::REMOVED)
+    }
+
+    /// O(depth): descendants keep their columns, only the node and its ancestors
+    /// stop counting them.
+    fn detach(&mut self, id: NodeId, flag: Flags) -> u64 {
         let i = id as usize;
-        if self.flags[i].contains(Flags::TRASHED) {
+        if self.flags[i].intersects(Flags::TRASHED | Flags::REMOVED) {
             return 0;
         }
         let size = self.size[i];
-        let items = self.items[i] + 1;
-        self.flags[i] |= Flags::TRASHED;
+        self.flags[i] |= flag;
         self.size[i] = 0;
-        let mut p = self.parent[i];
-        while p != NONE {
-            self.size[p as usize] -= size;
-            self.items[p as usize] -= items;
-            p = self.parent[p as usize];
-        }
+        self.bump(self.parent[i], -(size as i64), -(i64::from(self.items[i]) + 1));
         size
+    }
+
+    /// Set a file node's size and mtime after aggregation, carrying the change up
+    /// the parent chain. Returns the size delta.
+    pub fn set_size(&mut self, id: NodeId, size: u64, mtime: i64) -> i64 {
+        let i = id as usize;
+        let delta = size as i64 - self.size[i] as i64;
+        self.mtime[i] = mtime;
+        self.bump(id, delta, 0);
+        delta
+    }
+
+    /// Add a node after aggregation. `parent[i] < i` still holds because the new id
+    /// is the largest in the arena.
+    pub fn insert(&mut self, parent: NodeId, name: &[u8], size: u64, mtime: i64, flags: Flags) -> NodeId {
+        let id = self.push(parent, name, size, mtime, flags);
+        self.bump(parent, size as i64, 1);
+        id
+    }
+
+    /// Append an aggregated arena below `under`, its root standing for `under`
+    /// itself. Walkers zero the root's own size, so `sub.size[0]` is exactly what the
+    /// grafted nodes add. Appending keeps `parent[i] < i`.
+    pub fn graft(&mut self, sub: &Arena, under: NodeId) {
+        if sub.is_empty() {
+            return;
+        }
+        let base = self.len() as NodeId - 1;
+        for j in 1..sub.len() {
+            let p = sub.parent[j];
+            let parent = if p == 0 { under } else { base + p };
+            let id = self.push(parent, sub.name(j as NodeId), sub.size[j], sub.mtime[j], sub.flags[j]);
+            self.items[id as usize] = sub.items[j];
+        }
+        self.bump(under, sub.size[0] as i64, i64::from(sub.items[0]));
+    }
+
+    /// Saturating so a bookkeeping slip shows up as a wrong total, not a wrapped one.
+    fn bump(&mut self, mut id: NodeId, size: i64, items: i64) {
+        while id != NONE {
+            let i = id as usize;
+            self.size[i] = self.size[i].saturating_add_signed(size);
+            self.items[i] = self.items[i].saturating_add_signed(items as i32);
+            id = self.parent[i];
+        }
     }
 }
 
 /// Children of every node, sorted by size descending, in CSR form.
-/// Built once after a scan so views never scan the whole arena.
+/// Built once after a scan so views never scan the whole arena. It cannot take new
+/// children: after `insert` or `graft`, build it again (once per batch of updates).
 pub struct ChildIndex {
     start: Vec<u32>,
     list: Vec<NodeId>,
