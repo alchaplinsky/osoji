@@ -7,6 +7,8 @@
 //! new one. Batches arrive one at a time on the watcher's thread, so phases of two batches never
 //! interleave.
 //!
+//! A sweep's own deletes are skipped once per parent (`hush`): the sweep already applied them.
+//!
 //! Not yet: nodes added here are not matched against the policy. `hits` and the policy flags
 //! cover only what the scan itself found.
 
@@ -15,8 +17,10 @@ use scan_core::live::{is_gone, reconcile, DirEntry};
 use scan_core::{Arena, Cancel, ChildIndex, Flags, NodeId, Progress, ScanConfig, NONE};
 use scan_macos::{Batch, Watcher};
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Listened for in src/lib/api.ts.
@@ -43,10 +47,40 @@ pub(crate) fn watch(app: AppHandle, root: &Path) -> std::io::Result<Watcher> {
 
 /// Fold one watcher batch into the scan. `emit` gets the directories whose contents changed,
 /// and is not called when nothing did.
-pub(crate) fn apply_batch(state: &AppState, batch: Batch, emit: impl Fn(Vec<NodeId>)) {
+pub(crate) fn apply_batch(state: &AppState, mut batch: Batch, emit: impl Fn(Vec<NodeId>)) {
+    drop_quiet(&mut state.quiet.lock().unwrap(), &mut batch.dirs, Instant::now());
     if let Some(snapshot) = Snapshot::take(state, batch) {
         snapshot.apply(state, emit);
     }
+}
+
+/// Long enough for a sweep's echo to arrive (500 ms debounce after its last delete), short enough
+/// that a delete which produced no event cannot swallow a real change much later.
+const QUIET_FOR: Duration = Duration::from_secs(5);
+
+/// A sweep marks what it moves exactly, so the watcher's report of those parents would only list
+/// them again to find nothing new. Mark them before deleting; their next event is skipped once.
+/// An outside change to one of them in the same debounce window is skipped with it, and caught
+/// by the next event there: reconcile is idempotent, so nothing is lost but latency.
+pub(crate) fn hush(state: &AppState, dirs: &[PathBuf]) {
+    let now = Instant::now();
+    state.quiet.lock().unwrap().extend(dirs.iter().map(|d| (d.clone(), now)));
+}
+
+/// A failed delete changed nothing, so no event will come to consume its parent's mark, unless
+/// another delete there went through. `parents` pairs with `outcomes` by index.
+pub(crate) fn unhush_failed(state: &AppState, parents: &[PathBuf], outcomes: &[(NodeId, u64, Result<(), String>)]) {
+    let moved: HashSet<&PathBuf> = parents.iter().zip(outcomes).filter(|(_, o)| o.2.is_ok()).map(|(p, _)| p).collect();
+    let mut quiet = state.quiet.lock().unwrap();
+    for (p, _) in parents.iter().zip(outcomes).filter(|(p, o)| o.2.is_err() && !moved.contains(p)) {
+        quiet.remove(p);
+    }
+}
+
+/// Take quiet directories out of `dirs`, consuming each mark, after forgetting expired ones.
+fn drop_quiet(quiet: &mut HashMap<PathBuf, Instant>, dirs: &mut Vec<PathBuf>, now: Instant) {
+    quiet.retain(|_, &mut at| now.duration_since(at) < QUIET_FOR);
+    dirs.retain(|d| quiet.remove(d).is_none());
 }
 
 /// What a batch refers to in the arena as it was when the batch arrived.
@@ -221,7 +255,7 @@ mod tests {
         let index = ChildIndex::build(&arena);
         let state = AppState::default();
         *state.scan.lock().unwrap() =
-            Some(Scan { root: root.to_path_buf(), arena, index, hits: PolicyHits::default(), swept: (0, 0) });
+            Some(Scan { root: root.to_path_buf(), arena, index, hits: PolicyHits::default() });
         state
     }
 
@@ -324,6 +358,58 @@ mod tests {
         assert_eq!(apply(&state, batch), vec![vec![a_id]]);
         assert_fresh(&state, &root);
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_sweeps_own_echo_is_skipped_once_and_other_dirs_still_apply() {
+        let root = temp_root("quiet");
+        let state = state_for(&root);
+        let a = root.join("a");
+        let a_id = id_of(&state, &a);
+
+        // As `sweep` does it: hush, delete, then mark.
+        let x = id_of(&state, &a.join("x"));
+        hush(&state, std::slice::from_ref(&a));
+        fs::remove_file(a.join("x")).unwrap();
+        state.scan.lock().unwrap().as_mut().unwrap().arena.mark_trashed(x);
+        fs::remove_file(root.join("b")).unwrap();
+        assert_eq!(apply(&state, dirs(&[&root, &a])), vec![vec![0]], "only the root is listed");
+        assert!(state.quiet.lock().unwrap().is_empty());
+        assert_fresh(&state, &root);
+
+        write(&a.join("n"), 1_000);
+        assert_eq!(apply(&state, dirs(&[&a])), vec![vec![a_id]], "the mark was used up");
+        assert_fresh(&state, &root);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn an_expired_quiet_mark_skips_nothing() {
+        let root = temp_root("quiet-expired");
+        let state = state_for(&root);
+        let a = root.join("a");
+        let a_id = id_of(&state, &a);
+
+        let long_ago = Instant::now().checked_sub(QUIET_FOR + Duration::from_secs(1)).unwrap();
+        state.quiet.lock().unwrap().insert(a.clone(), long_ago);
+        fs::remove_file(a.join("x")).unwrap();
+        assert_eq!(apply(&state, dirs(&[&a])), vec![vec![a_id]]);
+        assert!(state.quiet.lock().unwrap().is_empty(), "evicted");
+        assert_fresh(&state, &root);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_failed_delete_leaves_its_parent_loud_unless_another_delete_there_went_through() {
+        let state = AppState::default();
+        let (lone, shared) = (PathBuf::from("/r/lone"), PathBuf::from("/r/shared"));
+        let parents = [lone.clone(), shared.clone(), shared.clone()];
+        hush(&state, &parents);
+
+        let outcomes = [(1, 1, Err("no".to_string())), (2, 1, Err("no".to_string())), (3, 1, Ok(()))];
+        unhush_failed(&state, &parents, &outcomes);
+        let quiet = state.quiet.lock().unwrap();
+        assert_eq!(quiet.keys().collect::<Vec<_>>(), vec![&shared]);
     }
 
     #[test]

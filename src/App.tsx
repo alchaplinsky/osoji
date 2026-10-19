@@ -259,9 +259,10 @@ export default function App() {
   const canShow = (s: Screen) => s === "scan" || s === "settings" || (s === "watchers" ? watchersOn && scanned : scanned);
   const active = canShow(screen) ? screen : "scan";
 
-  // Stays on across screens so the breakdown is current when the user comes back to it. A sweep
-  // refreshes everything when it ends, so changes it causes are not chased mid-flight.
-  useLiveScan(() => refreshAll(explorer.currentId), { enabled: scan.status === "done" && !sweeping });
+  // Stays on across screens so the breakdown is current when the user comes back to it. Paused
+  // during a sweep so changes it causes are not chased mid-flight; one that landed meanwhile (the
+  // Trash growing after the last delete) is refreshed once the sweep ends.
+  useLiveScan(() => refreshAll(explorer.currentId), { enabled: scan.status === "done", paused: sweeping });
 
   useShortcuts(
     {

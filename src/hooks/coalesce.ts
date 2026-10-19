@@ -24,3 +24,26 @@ export function coalesce(run: () => Promise<void> | void, onError: (e: unknown) 
     else void drain();
   };
 }
+
+// `coalesce`, plus a pause: while paused, triggers only leave a mark, and resuming replays them
+// as one run. The check is made when a run would start, so a follow-up queued before the pause
+// waits for the resume too.
+export function pausable(
+  run: () => Promise<void> | void,
+  onError?: (e: unknown) => void,
+): { trigger: () => void; setPaused: (paused: boolean) => void } {
+  let paused = false;
+  let missed = false;
+  const trigger = coalesce(() => {
+    if (!paused) return run();
+    missed = true;
+  }, onError);
+  const setPaused = (next: boolean) => {
+    paused = next;
+    if (!paused && missed) {
+      missed = false;
+      trigger();
+    }
+  };
+  return { trigger, setPaused };
+}

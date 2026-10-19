@@ -5,11 +5,12 @@ mod live;
 #[cfg(target_os = "macos")]
 mod zoom;
 
+use scan_core::live::is_gone;
 use scan_core::{Arena, Cancel, ChildIndex, Flags, NodeId, Progress, ScanConfig, NONE};
 use scan_policy::{covering, Kind, Policy, PolicyContext, PolicyHits, Safety};
 use serde::Serialize;
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::ffi::{CStr, CString};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -23,8 +24,6 @@ struct Scan {
     arena: Arena,
     index: ChildIndex,
     hits: PolicyHits,
-    /// Bytes and items Osoji moved to the Trash since the scan, which the arena no longer counts.
-    swept: (u64, u32),
 }
 
 #[derive(Default)]
@@ -38,6 +37,9 @@ struct AppState {
     sweeping: AtomicBool,
     /// Keeps `scan` current with the disk; replaced along with it.
     watcher: Mutex<Option<scan_macos::Watcher>>,
+    /// Canonical directories whose next watcher event is a sweep's own echo, with when the sweep
+    /// started. See `live::hush`.
+    quiet: Mutex<HashMap<PathBuf, Instant>>,
 }
 
 /// Why the UI should treat a node with care: "trash", "protected", "risky" or "unexpected".
@@ -316,7 +318,7 @@ async fn start_scan(
         let hits = state.policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
         {
             let mut slot = state.scan.lock().unwrap();
-            *slot = Some(Scan { root: cfg.root.clone(), arena, index, hits, swept: (0, 0) });
+            *slot = Some(Scan { root: cfg.root.clone(), arena, index, hits });
             state.generation.fetch_add(1, Ordering::AcqRel);
         }
         // Stop the old watcher before starting the next, so batches are only ever applied one at
@@ -598,6 +600,7 @@ fn has_ancestor(a: &Arena, id: NodeId, ancestor: NodeId) -> bool {
 }
 
 /// Why `id` must not go to the Trash: it is protected, or it holds a protected node that would go with it.
+/// A protected node that left the tree, or sits under one that did, is no longer inside `id`.
 fn protection(policy: &Policy, scan: &Scan, id: NodeId) -> Option<String> {
     let a = &scan.arena;
     let reason = |node: NodeId| scan.hits.rule(node).map_or("", |r| policy.rule(r).reason.as_str());
@@ -608,7 +611,9 @@ fn protection(policy: &Policy, scan: &Scan, id: NodeId) -> Option<String> {
         .hits
         .iter()
         .map(|(node, _)| node)
-        .filter(|&node| a.flags[node as usize].contains(Flags::PROTECTED) && has_ancestor(a, node, id))
+        .filter(|&node| {
+            a.flags[node as usize].contains(Flags::PROTECTED) && has_ancestor(a, node, id) && !is_gone(a, node)
+        })
         .min()?;
     Some(format!("{}: protected. It contains {}. {}", a.path(id).display(), a.path(inner).display(), reason(inner)))
 }
@@ -643,6 +648,8 @@ fn plan_sweep(policy: &Policy, scan: &Scan, nodes: Vec<NodeId>) -> Result<(Vec<S
 
 /// Fold the delete outcomes into the tree. `live` is None when another scan replaced the arena
 /// meanwhile: the items are still reported as moved, but nothing is marked.
+/// Bytes are the planned sizes: a live update that saw the delete first already detached the
+/// node, and marking it then moves nothing.
 fn finish_sweep(
     mut live: Option<&mut Scan>,
     outcomes: Vec<(NodeId, u64, Result<(), String>)>,
@@ -656,13 +663,11 @@ fn finish_sweep(
             continue;
         }
         trashed.push(id);
+        bytes += size;
         let Some(scan) = live.as_deref_mut() else {
-            bytes += size;
             continue;
         };
-        let moved = scan.arena.mark_trashed(id);
-        bytes += moved;
-        scan.swept = (scan.swept.0 + moved, scan.swept.1 + 1);
+        scan.arena.mark_trashed(id);
         let mut p = scan.arena.parent[id as usize];
         while p != NONE {
             scan.index.resort(&scan.arena, p);
@@ -700,6 +705,11 @@ async fn sweep(
         (state.generation.load(Ordering::Acquire), items, refused)
     };
 
+    // Before the first delete, so its event can never arrive first. Never the Trash itself: nothing
+    // planned is in it, and its growth is a change to reconcile.
+    let parents: Vec<PathBuf> = items.iter().map(|(_, p, _, _)| p.parent().unwrap_or(p).to_path_buf()).collect();
+    live::hush(state, &parents);
+
     let total = items.len();
     let outcomes = tauri::async_runtime::spawn_blocking(move || {
         let mut bytes = 0u64;
@@ -719,6 +729,7 @@ async fn sweep(
     })
     .await
     .map_err(|e| e.to_string())?;
+    live::unhush_failed(state, &parents, &outcomes);
 
     let mut guard = state.scan.lock().unwrap();
     // A scan that finished meanwhile replaced the arena: the ids no longer point at what was deleted.
@@ -735,15 +746,17 @@ struct TrashInfo {
     items: u32,
 }
 
-/// The user's Trash folder as scanned, plus what Osoji moved there since. None when the scan does not cover it.
+/// The user's Trash folder as the scan currently has it: what a sweep moves there arrives as a live
+/// update like any other change. None when the scan does not cover it.
 fn trash_of(policy: &Policy, scan: &Scan) -> Option<TrashInfo> {
     let id = scan.hits.iter().filter(|&(_, rule)| policy.rule(rule).kind == Kind::Trash).map(|(id, _)| id).min()?;
     let a = &scan.arena;
+    let live = scan.index.children(id).iter().filter(|&&c| !a.flags[c as usize].intersects(DETACHED));
     Some(TrashInfo {
         id,
         path: a.path(id).to_string_lossy().into_owned(),
-        size: a.size[id as usize] + scan.swept.0,
-        items: scan.index.children(id).len() as u32 + scan.swept.1,
+        size: a.size[id as usize],
+        items: live.count() as u32,
     })
 }
 
@@ -906,6 +919,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scan_core::live::{reconcile, DirEntry};
 
     fn scan_fixture() -> (Scan, NodeId, NodeId) {
         let mut arena = Arena::default();
@@ -914,11 +928,7 @@ mod tests {
         let file = arena.push(folder, b"file.bin", 10, 0, Flags::empty());
         arena.aggregate();
         let index = ChildIndex::build(&arena);
-        (
-            Scan { root: PathBuf::from("/tmp/root"), arena, index, hits: PolicyHits::default(), swept: (0, 0) },
-            folder,
-            file,
-        )
+        (Scan { root: PathBuf::from("/tmp/root"), arena, index, hits: PolicyHits::default() }, folder, file)
     }
 
     #[test]
@@ -979,11 +989,7 @@ mod tests {
         let policy = Policy::from_toml(TRASH_POLICY).unwrap();
         let ctx = PolicyContext { home: PathBuf::new(), now: 0 };
         let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
-        (
-            policy,
-            Scan { root: PathBuf::from("/tmp/root"), arena, index, hits, swept: (0, 0) },
-            [trash, docs, old, report],
-        )
+        (policy, Scan { root: PathBuf::from("/tmp/root"), arena, index, hits }, [trash, docs, old, report])
     }
 
     #[test]
@@ -1014,18 +1020,43 @@ mod tests {
         assert_eq!(names, ["report.pdf", "notes.txt"]);
     }
 
+    fn listed(name: &str, size: u64) -> DirEntry {
+        DirEntry { name: name.as_bytes().to_vec(), size, mtime: 0, flags: Flags::empty() }
+    }
+
     #[test]
-    fn reports_the_trash_with_what_was_swept_since_the_scan() {
+    fn reports_the_trash_as_the_live_updates_leave_it() {
         let (policy, mut scan, [trash, _, _, report]) = trash_fixture();
         let info = trash_of(&policy, &scan).unwrap();
         assert_eq!((info.id, info.path.as_str(), info.size, info.items), (trash, "/tmp/root/.Trash", 100, 1));
 
+        // The sweep only takes the file out of `docs`; the Trash grows when its own listing arrives.
         finish_sweep(Some(&mut scan), vec![(report, 20, Ok(()))], Vec::new());
+        let info = trash_of(&policy, &scan).unwrap();
+        assert_eq!((info.size, info.items), (100, 1));
+
+        reconcile(&mut scan.arena, &scan.index, trash, &[listed("old.iso", 100), listed("report.pdf", 20)]);
+        scan.index = ChildIndex::build(&scan.arena);
         let info = trash_of(&policy, &scan).unwrap();
         assert_eq!((info.size, info.items), (120, 2));
 
+        // Emptied from Finder: the removed children stay in the index but no longer count.
+        reconcile(&mut scan.arena, &scan.index, trash, &[listed("report.pdf", 20)]);
+        let info = trash_of(&policy, &scan).unwrap();
+        assert_eq!((info.size, info.items), (20, 1));
+
         let (plain, _, _) = scan_fixture();
         assert!(trash_of(&policy, &plain).is_none());
+    }
+
+    #[test]
+    fn a_sweep_reports_the_planned_size_when_a_live_update_got_there_first() {
+        let (mut scan, _, file) = scan_fixture();
+        scan.arena.mark_removed(file);
+
+        let result = finish_sweep(Some(&mut scan), vec![(file, 10, Ok(()))], Vec::new());
+        assert_eq!((result.bytes, result.count), (10, 1));
+        assert_eq!(scan.arena.size[0], 0, "not taken off the parents twice");
     }
 
     const GUARD_POLICY: &str = r#"
@@ -1061,7 +1092,7 @@ mod tests {
         let policy = Policy::from_toml(GUARD_POLICY).unwrap();
         let ctx = PolicyContext { home: PathBuf::new(), now: 0 };
         let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
-        let mut scan = Scan { root: PathBuf::from("/tmp/root"), arena, index, hits, swept: (0, 0) };
+        let mut scan = Scan { root: PathBuf::from("/tmp/root"), arena, index, hits };
 
         assert_eq!(guard_of(&policy, &scan, keep), Some(Guard { kind: "protected", reason: "Keep it.".into() }));
         assert_eq!(guard_of(&policy, &scan, loose), Some(Guard { kind: "risky", reason: "Big file.".into() }));
@@ -1090,6 +1121,28 @@ mod tests {
     }
 
     #[test]
+    fn a_protected_node_that_left_the_tree_no_longer_guards_its_old_ancestors() {
+        let mut arena = Arena::default();
+        let root = arena.push(NONE, b"/tmp/root", 0, 0, Flags::DIR);
+        let boxed = arena.push(root, b"box", 0, 0, Flags::DIR);
+        let shelf = arena.push(boxed, b"shelf", 0, 0, Flags::DIR);
+        let vault = arena.push(shelf, b".vault", 0, 0, Flags::DIR);
+        arena.aggregate();
+        let index = ChildIndex::build(&arena);
+        let policy = Policy::from_toml(GUARD_POLICY).unwrap();
+        let ctx = PolicyContext { home: PathBuf::new(), now: 0 };
+        let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
+        let mut scan = Scan { root: PathBuf::from("/tmp/root"), arena, index, hits };
+        assert!(protection(&policy, &scan, boxed).is_some());
+
+        scan.arena.mark_removed(vault);
+        assert_eq!(protection(&policy, &scan, boxed), None);
+        assert_eq!(protection(&policy, &scan, shelf), None);
+        let (items, refused) = plan_sweep(&policy, &scan, vec![boxed]).unwrap();
+        assert_eq!((items.len(), refused.len()), (1, 0));
+    }
+
+    #[test]
     fn scans_a_root_reached_through_a_symlink() {
         use std::fs;
         // Not canonicalized: on macOS the temp dir itself sits under the /var symlink.
@@ -1105,7 +1158,7 @@ mod tests {
         let cfg = ScanConfig { root: root.clone(), threads: 2, cross_mounts: false, qos: false };
         let arena = scan_macos::walk(&cfg, &Progress::default(), &Cancel::new(false)).unwrap();
         let index = ChildIndex::build(&arena);
-        let scan = Scan { root, arena, index, hits: PolicyHits::default(), swept: (0, 0) };
+        let scan = Scan { root, arena, index, hits: PolicyHits::default() };
 
         let f = find_node(&scan, &fs::canonicalize(link.join("sub/f")).unwrap());
         assert_ne!(f, NONE);
@@ -1138,7 +1191,7 @@ mod tests {
         let index = ChildIndex::build(&arena);
         let ctx = PolicyContext { home: home.to_path_buf(), now };
         let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
-        let scan = Scan { root: root.to_path_buf(), arena, index, hits, swept: (0, 0) };
+        let scan = Scan { root: root.to_path_buf(), arena, index, hits };
         collect_suggestions(&policy, &scan, &ctx)
     }
 

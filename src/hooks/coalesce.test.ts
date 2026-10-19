@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { coalesce } from "./coalesce";
+import { coalesce, pausable } from "./coalesce";
 
 function deferred() {
   let resolve!: () => void;
@@ -88,5 +88,62 @@ describe("coalesce", () => {
     trigger();
     await flush();
     expect(onError).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("pausable", () => {
+  test("holds a trigger while paused and runs it once on resume", async () => {
+    const run = vi.fn();
+    const gate = pausable(run);
+    gate.setPaused(true);
+    gate.trigger();
+    await flush();
+    expect(run).not.toHaveBeenCalled();
+
+    gate.setPaused(false);
+    await flush();
+    expect(run).toHaveBeenCalledTimes(1);
+    gate.setPaused(false);
+    await flush();
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  test("collapses triggers while paused into one run", async () => {
+    const run = vi.fn();
+    const gate = pausable(run);
+    gate.setPaused(true);
+    gate.trigger();
+    await flush();
+    gate.trigger();
+    gate.setPaused(false);
+    await flush();
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  test("resuming with nothing missed runs nothing", async () => {
+    const run = vi.fn();
+    const gate = pausable(run);
+    gate.setPaused(true);
+    gate.setPaused(false);
+    await flush();
+    expect(run).not.toHaveBeenCalled();
+    gate.trigger();
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  test("a follow-up queued before the pause waits for the resume", async () => {
+    const first = deferred();
+    const run = vi.fn().mockReturnValueOnce(first.promise).mockReturnValue(undefined);
+    const gate = pausable(run);
+    gate.trigger();
+    gate.trigger();
+    gate.setPaused(true);
+    first.resolve();
+    await flush();
+    expect(run).toHaveBeenCalledTimes(1);
+
+    gate.setPaused(false);
+    await flush();
+    expect(run).toHaveBeenCalledTimes(2);
   });
 });
