@@ -151,7 +151,7 @@ fn update(
     let mut changed = Vec::new();
     let mut new_dirs = Vec::new();
     for (dir, listing) in listings {
-        let r = reconcile(&mut scan.arena, &scan.index, *dir, listing);
+        let r = reconcile(&mut scan.arena, &scan.index, &mut scan_core::live::Hardlinks::default(), *dir, listing);
         if r.is_empty() {
             continue;
         }
@@ -179,7 +179,7 @@ fn update(
 /// that would empty a directory that is only unreadable.
 fn walk(path: &Path) -> Option<Arena> {
     let cfg = ScanConfig { root: path.to_path_buf(), threads: WALK_THREADS, cross_mounts: false, qos: false };
-    match scan_macos::walk(&cfg, &Progress::default(), &Cancel::new(false)) {
+    match scan_macos::walk(&cfg, &Progress::default(), &Cancel::new(false), &scan_core::HardlinkSet::default()) {
         Ok(sub) if !sub.flags[0].contains(Flags::ERROR) => Some(sub),
         Ok(_) => {
             eprintln!("live: can't read {}", path.display());

@@ -290,7 +290,7 @@ async fn start_scan(
 
     let task = {
         let (cfg, progress, cancel) = (cfg.clone(), progress.clone(), cancel.clone());
-        tauri::async_runtime::spawn_blocking(move || scan_macos::walk(&cfg, &progress, &cancel)).await
+        tauri::async_runtime::spawn_blocking(move || scan_macos::walk(&cfg, &progress, &cancel, &scan_core::HardlinkSet::default())).await
     };
     done.store(true, Ordering::Release);
     let _ = poller.join();
@@ -1103,7 +1103,7 @@ mod tests {
         let root = resolve_root(link.to_str().unwrap()).unwrap();
         assert_eq!(root, fs::canonicalize(base.join("real")).unwrap());
         let cfg = ScanConfig { root: root.clone(), threads: 2, cross_mounts: false, qos: false };
-        let arena = scan_macos::walk(&cfg, &Progress::default(), &Cancel::new(false)).unwrap();
+        let arena = scan_macos::walk(&cfg, &Progress::default(), &Cancel::new(false), &scan_core::HardlinkSet::default()).unwrap();
         let index = ChildIndex::build(&arena);
         let scan = Scan { root, arena, index, hits: PolicyHits::default(), swept: (0, 0) };
 
