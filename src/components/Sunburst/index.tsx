@@ -71,7 +71,8 @@ export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp,
                   <path d={d} className={styles[arc.key as "hidden" | "free"]} style={arc.key === "hidden" ? { fill: paint("hidden") } : undefined} />
                 ) : (
                   <>
-                    {!inBin && glowing.includes(arc.key) && <path d={d} className={glass.halo} filter={paint("glow")} style={tint(color)} />}
+                    {/* No glow layer mid-zoom: filters are off then, and the copy would show unblurred. */}
+                    {!zoom && !inBin && glowing.includes(arc.key) && <path d={d} className={glass.halo} filter={paint("glow")} style={tint(color)} />}
                     <path
                       d={d}
                       className={glass.shape}
