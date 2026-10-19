@@ -25,7 +25,8 @@ function centerOf(view: ViewNode, disk: Disk | undefined, arcs: Arc[], hoverId: 
 
 export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp, onSelectFile, onContextMenu, disk, centerSize = 20, className }: VizProps) {
   const [rootRef, size] = useElementSize<HTMLDivElement>();
-  const hatchId = useId();
+  // useId() contains colons, which break url(#…) references in WebKit.
+  const hatchId = useId().replace(/:/g, "");
   const arcs = useMemo(() => layoutArcs(view, disk), [view, disk]);
   const related = useMemo(() => relatedKeys(view, hoverId), [view, hoverId]);
   const g = geometry(size.w, size.h);
