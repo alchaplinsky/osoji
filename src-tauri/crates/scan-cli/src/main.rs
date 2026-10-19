@@ -94,7 +94,7 @@ fn main() {
     let cancel = AtomicBool::new(false);
     let t0 = Instant::now();
     let result = match args.walker {
-        Walker::Bulk => scan_macos::walk(&cfg, &progress, &cancel),
+        Walker::Bulk => scan_macos::walk(&cfg, &progress, &cancel, &scan_core::HardlinkSet::default()),
         Walker::Jwalk => scan_core::jwalk_walker::walk(&cfg, &progress, &cancel, &scan_core::HardlinkSet::default()),
     };
     let elapsed = t0.elapsed();
