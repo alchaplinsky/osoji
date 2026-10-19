@@ -12,6 +12,7 @@ import { dragProps, pointerProps } from "../interact";
 import type { VizProps } from "../types";
 import InsideBar from "./InsideBar";
 import Legend from "./Legend";
+import { MIN_SHARE } from "./share";
 import styles from "./Shelf.module.css";
 
 const LABEL_SHARE = 10;
@@ -26,7 +27,7 @@ function focusOf(view: ViewNode, slices: Slice[], hoverId: HoverId): ViewNode | 
 }
 
 export default function Shelf({ view, theme, hoverId, onHover, onDrill, onSelectFile, onDragStart, onContextMenu, binIds, className }: VizProps) {
-  const slices = useMemo(() => visibleSlices(view, theme), [view, theme]);
+  const slices = useMemo(() => visibleSlices(view, theme, 14, MIN_SHARE), [view, theme]);
   const related = useMemo(() => relatedKeys(view, hoverId), [view, hoverId]);
   const binned = useMemo(() => binnedKeys(view, binIds), [view, binIds]);
   const focus = focusOf(view, slices, hoverId);
