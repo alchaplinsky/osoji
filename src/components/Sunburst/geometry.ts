@@ -1,14 +1,20 @@
 import { MAX_DEPTH, TAU, type Arc } from "./layout";
 
-export type Geometry = { cx: number; cy: number; r0: number; ring: number };
+/** `ring` is the pitch from one ring to the next; `gap` is the empty part of it, also left around the hole. */
+export type Geometry = { cx: number; cy: number; r0: number; ring: number; gap: number };
+
+/** The prototype's proportions: the hole is 32% of the radius, and each ring's pitch is 7 parts ring to 1 part gap. */
+const HOLE = 0.32;
+const GAP_SHARE = 1 / 8;
 
 export function geometry(width: number, height: number): Geometry {
   const R = Math.max(0, Math.min(width, height) / 2 - 6);
-  const r0 = Math.round(R * 0.28);
-  return { cx: width / 2, cy: height / 2, r0, ring: (R - r0) / MAX_DEPTH };
+  const r0 = R * HOLE;
+  // The outermost ring ends at R: MAX_DEPTH pitches minus the gap after the last one.
+  const ring = (R - r0) / (MAX_DEPTH - GAP_SHARE);
+  return { cx: width / 2, cy: height / 2, r0, ring, gap: ring * GAP_SHARE };
 }
 
-const RING_GAP = 4;
 /** Gap between neighbouring arcs, in px along the ring's mid-line. */
 const ARC_GAP = 2.5;
 const CORNER = 5;
@@ -17,7 +23,7 @@ const MIN_SWEEP = 0.003;
 /** SVG path for an arc's ring segment, inset by the gaps and with rounded corners; null when too thin to draw. */
 export function arcPath(g: Geometry, arc: Arc): string | null {
   const r0 = g.r0 + (arc.depth - 1) * g.ring;
-  const r1 = g.r0 + arc.depth * g.ring - RING_GAP;
+  const r1 = g.r0 + arc.depth * g.ring - g.gap;
   if (arc.a1 - arc.a0 >= TAU - 1e-9) return annulus(g, r0, r1);
   const gap = ARC_GAP / ((r0 + r1) / 2);
   const a0 = arc.a0 + gap / 2 - Math.PI / 2;
