@@ -2,19 +2,32 @@
 //!
 //! A batch is applied in phases, and the `scan` lock is never held across I/O: resolve paths to
 //! ids (locked), list and walk (unlocked), reconcile and graft rescans (locked), walk new
-//! directories (unlocked), graft them (locked). `generation` is read with the ids and checked at
-//! every locked phase, because a finished scan replaces the arena and the ids mean nothing in the
-//! new one. Batches arrive one at a time on the watcher's thread, so phases of two batches never
-//! interleave.
+//! directories (unlocked), graft them and match what was added against the policy (locked).
 //!
-//! Not yet: nodes added here are not matched against the policy. `hits` and the policy flags
-//! cover only what the scan itself found.
+//! Two counters guard what was read before the lock was dropped. `generation` moves when a
+//! finished scan replaces the arena: the ids mean nothing in the new one, and that scan's walk saw
+//! the disk after the batch's events anyway, so the batch is dropped. `epoch` moves with every
+//! change to the arena, sweeps included. A listing is diffed against the arena's children, so one
+//! read before a sweep trashed a child still names it, and reconciling it would bring the child
+//! back as a new live node. So when the epoch moved since the snapshot, nothing is applied and
+//! the batch starts over from a fresh snapshot and fresh listings. Sweeps run one at a time and
+//! bump the epoch once each, and applies are serialized, so this converges in a retry or two.
+//! The second locked phase only grafts walks of directories the first one inserted, which no
+//! sweep can reach (they are not in the index yet, and a graft under a node detached meanwhile is
+//! skipped), so it checks `generation` alone; giving up there would leave the index without the
+//! nodes the first phase inserted.
+//!
+//! A scan in progress queues batches in `AppState.pending` instead; `drain` applies them once its
+//! result is in place. Applies hold `AppState.applying` throughout, so the watcher threads (two
+//! while a new scan replaces the old) and the drain never interleave phases.
 
-use crate::{find_node, AppState, Scan};
-use scan_core::live::{is_gone, reconcile, DirEntry};
-use scan_core::{Arena, Cancel, ChildIndex, Flags, NodeId, Progress, ScanConfig, NONE};
+use crate::{find_node, home_path, unix_now, AppState, Scan};
+use scan_core::live::{graft, is_gone, reconcile, DirEntry, Hardlinks};
+use scan_core::{Arena, Cancel, ChildIndex, Flags, HardlinkSet, NodeId, Progress, ScanConfig, NONE};
 use scan_macos::{Batch, Watcher};
+use scan_policy::PolicyContext;
 use serde::Serialize;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager};
@@ -25,39 +38,93 @@ const EVENT: &str = "scan:changed";
 /// Re-walks are usually small subtrees; a few threads keep them off the user's foreground work.
 const WALK_THREADS: usize = 2;
 
+/// Each retry follows a sweep that landed mid-batch; losing this many races in a row is not
+/// converging, and the next batch for these directories lists them again anyway.
+const ATTEMPTS: usize = 3;
+
 #[derive(Serialize, Clone)]
 struct Changed {
     dirs: Vec<NodeId>,
 }
 
 /// Watch `root`, folding each batch into whatever scan `app` holds and telling the UI what changed.
-pub(crate) fn watch(app: AppHandle, root: &Path) -> std::io::Result<Watcher> {
-    Watcher::start(root, move |batch| {
-        apply_batch(&app.state::<AppState>(), batch, |dirs| {
-            if let Err(e) = app.emit(EVENT, Changed { dirs }) {
-                eprintln!("live: emit {EVENT}: {e}");
-            }
-        });
-    })
+/// Blocks until FSEvents is live (about half a second).
+pub(crate) fn watch(app: AppHandle, root: &Path) -> io::Result<Watcher> {
+    Watcher::start(root, move |batch| on_batch(&app.state::<AppState>(), batch, notify(&app)))
+}
+
+/// Tells the UI which directories changed.
+pub(crate) fn notify(app: &AppHandle) -> impl Fn(Vec<NodeId>) + '_ {
+    move |dirs| {
+        if let Err(e) = app.emit(EVENT, Changed { dirs }) {
+            eprintln!("live: emit {EVENT}: {e}");
+        }
+    }
+}
+
+/// Queue `batch` while a scan runs, otherwise fold it in now.
+fn on_batch(state: &AppState, batch: Batch, emit: impl Fn(Vec<NodeId>)) {
+    if let Some(queue) = state.pending.lock().unwrap().as_mut() {
+        queue.push(batch);
+        return;
+    }
+    apply_batch(state, batch, emit);
+}
+
+/// Stop queueing and apply what was queued, oldest first. Batches arriving meanwhile apply directly
+/// and may overtake the queue, which is harmless: every apply lists the disk as it is then.
+pub(crate) fn drain(state: &AppState, emit: impl Fn(Vec<NodeId>)) {
+    let queued = state.pending.lock().unwrap().take().unwrap_or_default();
+    for batch in queued {
+        apply_batch(state, batch, &emit);
+    }
 }
 
 /// Fold one watcher batch into the scan. `emit` gets the directories whose contents changed,
 /// and is not called when nothing did.
 pub(crate) fn apply_batch(state: &AppState, batch: Batch, emit: impl Fn(Vec<NodeId>)) {
-    if let Some(snapshot) = Snapshot::take(state, batch) {
-        snapshot.apply(state, emit);
+    let _serial = state.applying.lock().unwrap();
+    for _ in 0..ATTEMPTS {
+        let Some(snapshot) = Snapshot::take(state, &batch) else {
+            return;
+        };
+        let reads = snapshot.read();
+        if snapshot.commit(state, reads, &emit).is_ok() {
+            return;
+        }
     }
+    eprintln!("live: the scan kept changing under a batch; dropped it after {ATTEMPTS} attempts");
 }
 
 /// What a batch refers to in the arena as it was when the batch arrived.
 struct Snapshot {
     generation: u64,
+    epoch: u64,
     dirs: Vec<(NodeId, PathBuf)>,
     rescans: Vec<(NodeId, PathBuf)>,
 }
 
+/// The arena changed since the snapshot, so what was read against it may be stale.
+struct Moved;
+
+/// What reading a directory found on disk.
+enum Read<T> {
+    Found(T),
+    /// Deleted, renamed away, or replaced by something that is not a directory.
+    Gone,
+}
+
+/// A walked subtree and the hard links found in it.
+type Tree = (Arena, Hardlinks);
+
+/// The unlocked phase's results for one snapshot.
+struct Reads {
+    listings: Vec<(NodeId, Read<Vec<DirEntry>>)>,
+    walks: Vec<(NodeId, Read<Tree>)>,
+}
+
 impl Snapshot {
-    fn take(state: &AppState, batch: Batch) -> Option<Snapshot> {
+    fn take(state: &AppState, batch: &Batch) -> Option<Snapshot> {
         let guard = state.scan.lock().unwrap();
         let scan = guard.as_ref()?;
         let generation = state.generation.load(Ordering::Acquire);
@@ -72,14 +139,14 @@ impl Snapshot {
             .filter(|&(id, _)| id != NONE)
             .collect();
         let mut rescans = Vec::new();
-        for path in batch.rescan {
-            match find_node(scan, &path) {
+        for path in &batch.rescan {
+            match find_node(scan, path) {
                 // A subtree new to the arena is a new entry in its nearest known ancestor, which a
                 // listing turns into a full walk.
                 NONE => dirs.extend(
                     path.ancestors().skip(1).map(|p| (find_node(scan, p), p.to_path_buf())).find(|&(id, _)| id != NONE),
                 ),
-                id => rescans.push((id, path)),
+                id => rescans.push((id, path.clone())),
             }
         }
         dirs.sort_unstable_by_key(|&(id, _)| id);
@@ -87,50 +154,59 @@ impl Snapshot {
         if dirs.is_empty() && rescans.is_empty() {
             return None;
         }
-        Some(Snapshot { generation, dirs, rescans })
+        Some(Snapshot { generation, epoch: scan.epoch, dirs, rescans })
     }
 
-    fn apply(self, state: &AppState, emit: impl Fn(Vec<NodeId>)) {
-        // A partial listing would drop the entries it missed, so a failed one skips the directory.
-        let listings: Vec<(NodeId, Vec<DirEntry>)> = self
-            .dirs
-            .into_iter()
-            .filter_map(|(id, path)| match scan_macos::list_dir(&path) {
-                Ok(listing) => Some((id, listing)),
-                Err(e) => {
-                    eprintln!("live: list {}: {e}", path.display());
-                    None
-                }
-            })
-            .collect();
-        let walks: Vec<(NodeId, Arena)> =
-            self.rescans.into_iter().filter_map(|(id, path)| walk(&path).map(|sub| (id, sub))).collect();
+    fn read(&self) -> Reads {
+        Reads {
+            listings: self.dirs.iter().filter_map(|(id, path)| list(path).map(|l| (*id, l))).collect(),
+            walks: self.rescans.iter().filter_map(|(id, path)| rescan(path).map(|w| (*id, w))).collect(),
+        }
+    }
 
-        let Some((mut changed, new_dirs)) = locked(state, self.generation, |scan| update(scan, &listings, &walks))
-        else {
-            return;
+    /// Apply `reads`, or `Moved` without touching the arena when it changed since the snapshot.
+    /// A scan replaced meanwhile makes the batch obsolete, which is not an error.
+    fn commit(self, state: &AppState, reads: Reads, emit: impl Fn(Vec<NodeId>)) -> Result<(), Moved> {
+        let epoch = self.epoch;
+        let first =
+            locked(
+                state,
+                self.generation,
+                |scan| if scan.epoch == epoch { Ok(update(scan, reads)) } else { Err(Moved) },
+            );
+        let Some(first) = first else {
+            return Ok(());
         };
+        let (first_new, mut changed, new_dirs) = first?;
         if changed.is_empty() {
-            return;
+            return Ok(());
         }
 
-        let grafts: Vec<(NodeId, Arena)> =
-            new_dirs.into_iter().filter_map(|(id, path)| walk(&path).map(|sub| (id, sub))).collect();
+        let grafts: Vec<(NodeId, Tree)> =
+            new_dirs.into_iter().filter_map(|(id, path)| walk(&path).map(|tree| (id, tree))).collect();
+        let ctx = PolicyContext { home: home_path(), now: unix_now() };
         let applied = locked(state, self.generation, |scan| {
-            for (id, sub) in &grafts {
+            for (id, (mut sub, sub_links)) in grafts {
                 // Swept or deleted since it was inserted; its walk would count under a detached node.
-                if !is_gone(&scan.arena, *id) {
-                    scan.arena.graft(sub, *id);
+                if !is_gone(&scan.arena, id) {
+                    graft(&mut scan.arena, &mut scan.links, &mut sub, sub_links, id);
                 }
             }
+            scan.epoch += 1;
             // Inserts and grafts are not in the index, and every change reorders its ancestors' children.
             scan.index = ChildIndex::build(&scan.arena);
+            // The policy resolves against the rebuilt index, so a pinned path that came back matches its new node.
+            if scan.arena.len() > first_new as usize {
+                let hits = state.policy.resolve(&scan.arena, &scan.index, &ctx).stamp_from(&mut scan.arena, first_new);
+                scan.hits.extend(hits);
+            }
         });
         if applied.is_some() {
             changed.sort_unstable();
             changed.dedup();
             emit(changed);
         }
+        Ok(())
     }
 }
 
@@ -141,46 +217,99 @@ fn locked<R>(state: &AppState, generation: u64, f: impl FnOnce(&mut Scan) -> R) 
     (state.generation.load(Ordering::Acquire) == generation).then(|| f(scan))
 }
 
-/// Reconcile each listing and replace each rescanned subtree. Returns the directories that changed
-/// and the new directories still to walk, with their paths.
-fn update(
-    scan: &mut Scan,
-    listings: &[(NodeId, Vec<DirEntry>)],
-    walks: &[(NodeId, Arena)],
-) -> (Vec<NodeId>, Vec<(NodeId, PathBuf)>) {
+/// Reconcile each listing and replace each rescanned subtree. Returns the first id this added
+/// (the arena's length before), the directories that changed, and the new directories still to
+/// walk, with their paths.
+fn update(scan: &mut Scan, reads: Reads) -> (NodeId, Vec<NodeId>, Vec<(NodeId, PathBuf)>) {
+    let first_new = scan.arena.len() as NodeId;
     let mut changed = Vec::new();
     let mut new_dirs = Vec::new();
-    for (dir, listing) in listings {
-        let r = reconcile(&mut scan.arena, &scan.index, &mut scan_core::live::Hardlinks::default(), *dir, listing);
+    for (dir, listing) in reads.listings {
+        let Read::Found(listing) = listing else {
+            changed.extend(vanish(scan, dir));
+            continue;
+        };
+        let r = reconcile(&mut scan.arena, &scan.index, &mut scan.links, dir, &listing);
         if r.is_empty() {
             continue;
         }
-        changed.push(*dir);
+        changed.push(dir);
         // The walker never descends into mount points or directories it cannot read either.
         let walkable =
             r.new_dirs.into_iter().filter(|&id| !scan.arena.flags[id as usize].intersects(Flags::MOUNT | Flags::ERROR));
         new_dirs.extend(walkable.map(|id| (id, scan.arena.path(id))));
     }
     // After the listings, so a subtree whose root a listing just removed is not grafted back.
-    for (id, sub) in walks {
-        if is_gone(&scan.arena, *id) {
+    for (id, walked) in reads.walks {
+        if is_gone(&scan.arena, id) {
             continue;
         }
-        for &c in scan.index.children(*id) {
-            scan.arena.mark_removed(c);
-        }
-        scan.arena.graft(sub, *id);
-        changed.push(*id);
+        let Read::Found((mut sub, sub_links)) = walked else {
+            changed.extend(vanish(scan, id));
+            continue;
+        };
+        // An empty listing removes every child the way reconcile does, so their hard links hand over.
+        reconcile(&mut scan.arena, &scan.index, &mut scan.links, id, &[]);
+        graft(&mut scan.arena, &mut scan.links, &mut sub, sub_links, id);
+        changed.push(id);
     }
-    (changed, new_dirs)
+    if !changed.is_empty() {
+        scan.epoch += 1;
+    }
+    (first_new, changed, new_dirs)
+}
+
+/// `dir` is no longer on disk: detach it, or for the root (the scan's anchor) everything under
+/// it. Returns the directory whose contents changed, if anything did.
+fn vanish(scan: &mut Scan, dir: NodeId) -> Option<NodeId> {
+    if is_gone(&scan.arena, dir) {
+        return None;
+    }
+    // Children go through reconcile so a hard link outside takes over the bytes of one inside.
+    let r = reconcile(&mut scan.arena, &scan.index, &mut scan.links, dir, &[]);
+    if dir == 0 {
+        return (!r.is_empty()).then_some(0);
+    }
+    scan.arena.mark_removed(dir);
+    Some(scan.arena.parent[dir as usize])
+}
+
+/// None when the directory is there but cannot be listed: a partial listing would drop the
+/// entries it missed.
+fn list(path: &Path) -> Option<Read<Vec<DirEntry>>> {
+    match scan_macos::list_dir(path) {
+        Ok(listing) => Some(Read::Found(listing)),
+        Err(e) if vanished(&e) => Some(Read::Gone),
+        Err(e) => {
+            eprintln!("live: list {}: {e}", path.display());
+            None
+        }
+    }
+}
+
+fn rescan(path: &Path) -> Option<Read<Tree>> {
+    if let Some(tree) = walk(path) {
+        return Some(Read::Found(tree));
+    }
+    // The walker flags a root it cannot open rather than failing; the path says whether it is gone.
+    match std::fs::symlink_metadata(path) {
+        Err(e) if vanished(&e) => Some(Read::Gone),
+        Ok(meta) if !meta.is_dir() => Some(Read::Gone),
+        _ => None,
+    }
+}
+
+fn vanished(e: &io::Error) -> bool {
+    matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory)
 }
 
 /// Walk `path` into a fresh arena rooted at it, or None when its root cannot be read: grafting
 /// that would empty a directory that is only unreadable.
-fn walk(path: &Path) -> Option<Arena> {
+fn walk(path: &Path) -> Option<Tree> {
     let cfg = ScanConfig { root: path.to_path_buf(), threads: WALK_THREADS, cross_mounts: false, qos: false };
-    match scan_macos::walk(&cfg, &Progress::default(), &Cancel::new(false), &scan_core::HardlinkSet::default()) {
-        Ok(sub) if !sub.flags[0].contains(Flags::ERROR) => Some(sub),
+    let links = HardlinkSet::default();
+    match scan_macos::walk(&cfg, &Progress::default(), &Cancel::new(false), &links) {
+        Ok(sub) if !sub.flags[0].contains(Flags::ERROR) => Some((sub, links.finish())),
         Ok(_) => {
             eprintln!("live: can't read {}", path.display());
             None
@@ -195,7 +324,8 @@ fn walk(path: &Path) -> Option<Arena> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scan_policy::PolicyHits;
+    use crate::{finish_sweep, plan_sweep};
+    use scan_policy::Policy;
     use std::cell::RefCell;
     use std::fs;
 
@@ -216,13 +346,23 @@ mod tests {
         fs::write(path, vec![0xA5u8; bytes]).unwrap();
     }
 
-    fn state_for(root: &Path) -> AppState {
-        let arena = walk(root).unwrap();
+    /// A finished scan of `root`, stamped as `start_scan` stamps it.
+    fn scan_of(root: &Path, policy: &Policy) -> Scan {
+        let (mut arena, links) = walk(root).unwrap();
         let index = ChildIndex::build(&arena);
-        let state = AppState::default();
-        *state.scan.lock().unwrap() =
-            Some(Scan { root: root.to_path_buf(), arena, index, hits: PolicyHits::default(), swept: (0, 0) });
+        let ctx = PolicyContext { home: home_path(), now: unix_now() };
+        let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
+        Scan { root: root.to_path_buf(), arena, index, hits, links, swept: (0, 0), epoch: 0 }
+    }
+
+    fn state_with(root: &Path, policy: Policy) -> AppState {
+        let state = AppState { policy, ..AppState::default() };
+        *state.scan.lock().unwrap() = Some(scan_of(root, &state.policy));
         state
+    }
+
+    fn state_for(root: &Path) -> AppState {
+        state_with(root, Policy::default())
     }
 
     /// Live nodes by path, so arenas with different id layouts compare equal.
@@ -235,16 +375,20 @@ mod tests {
         out
     }
 
+    fn with_scan<R>(state: &AppState, f: impl FnOnce(&Scan) -> R) -> R {
+        f(state.scan.lock().unwrap().as_ref().unwrap())
+    }
+
     fn current(state: &AppState) -> Vec<(PathBuf, u64, u32)> {
-        dump(&state.scan.lock().unwrap().as_ref().unwrap().arena)
+        with_scan(state, |scan| dump(&scan.arena))
     }
 
     fn assert_fresh(state: &AppState, root: &Path) {
-        assert_eq!(current(state), dump(&walk(root).unwrap()));
+        assert_eq!(current(state), dump(&walk(root).unwrap().0));
     }
 
     fn id_of(state: &AppState, path: &Path) -> NodeId {
-        find_node(state.scan.lock().unwrap().as_ref().unwrap(), path)
+        with_scan(state, |scan| find_node(scan, path))
     }
 
     /// Apply `batch` and return what was emitted.
@@ -335,13 +479,226 @@ mod tests {
 
         fs::remove_file(a.join("x")).unwrap();
         write(&a.join("n"), 1_000);
-        let snapshot = Snapshot::take(&state, dirs(&[&a])).unwrap();
+        let snapshot = Snapshot::take(&state, &dirs(&[&a])).unwrap();
         state.generation.fetch_add(1, Ordering::AcqRel);
+        let reads = snapshot.read();
         let emitted = RefCell::new(Vec::new());
-        snapshot.apply(&state, |ids| emitted.borrow_mut().push(ids));
+        assert!(snapshot.commit(&state, reads, |ids| emitted.borrow_mut().push(ids)).is_ok());
 
         assert!(emitted.into_inner().is_empty());
         assert_eq!(current(&state), before);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn batches_queued_during_a_scan_apply_to_the_scan_that_replaces_it() {
+        let old_root = temp_root("queue-old");
+        let root = temp_root("queue-new");
+        let state = state_for(&old_root);
+        let before = current(&state);
+        *state.pending.lock().unwrap() = Some(Vec::new());
+
+        // The new walk has already passed `a` when it changes; the old root changes too.
+        let walked = scan_of(&root, &state.policy);
+        fs::remove_file(root.join("a/x")).unwrap();
+        write(&root.join("a/n"), 2_000);
+        fs::remove_file(old_root.join("b")).unwrap();
+        let emitted = RefCell::new(Vec::new());
+        let emit = |ids: Vec<NodeId>| emitted.borrow_mut().push(ids);
+        on_batch(&state, dirs(&[&root.join("a")]), emit);
+        on_batch(&state, dirs(&[&old_root]), emit);
+        assert!(emitted.borrow().is_empty());
+        assert_eq!(current(&state), before, "nothing applies while queued");
+
+        *state.scan.lock().unwrap() = Some(walked);
+        state.generation.fetch_add(1, Ordering::AcqRel);
+        drain(&state, emit);
+        assert!(state.pending.lock().unwrap().is_none());
+        assert_eq!(emitted.into_inner(), vec![vec![id_of(&state, &root.join("a"))]]);
+        assert_fresh(&state, &root);
+        fs::remove_dir_all(&old_root).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn batches_queued_during_a_cancelled_scan_apply_to_the_scan_that_stays() {
+        let root = temp_root("queue-cancel");
+        let state = state_for(&root);
+        let a_id = id_of(&state, &root.join("a"));
+        *state.pending.lock().unwrap() = Some(Vec::new());
+
+        fs::remove_file(root.join("a/y")).unwrap();
+        let emitted = RefCell::new(Vec::new());
+        let emit = |ids: Vec<NodeId>| emitted.borrow_mut().push(ids);
+        on_batch(&state, dirs(&[&root.join("a")]), emit);
+        assert!(emitted.borrow().is_empty());
+
+        drain(&state, emit);
+        assert_eq!(emitted.into_inner(), vec![vec![a_id]]);
+        assert_fresh(&state, &root);
+        // No longer queueing: the next batch applies at once.
+        write(&root.join("a/y"), 5_000);
+        assert_eq!(apply(&state, dirs(&[&root.join("a")])), vec![vec![a_id]]);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_listing_read_before_a_sweep_does_not_bring_the_swept_item_back() {
+        let root = temp_root("swept");
+        let state = state_for(&root);
+        let a = root.join("a");
+        let x = a.join("x");
+        let x_id = id_of(&state, &x);
+        write(&a.join("n"), 1_000);
+        let batch = dirs(&[&a]);
+
+        let snapshot = Snapshot::take(&state, &batch).unwrap();
+        let reads = snapshot.read();
+        // The sweep lands between the listing, which still holds `x`, and the locked phase.
+        fs::remove_file(&x).unwrap();
+        let len = {
+            let mut guard = state.scan.lock().unwrap();
+            let scan = guard.as_mut().unwrap();
+            let size = scan.arena.size[x_id as usize];
+            finish_sweep(Some(&mut *scan), vec![(x_id, size, Ok(()))], Vec::new());
+            scan.arena.len()
+        };
+        assert!(snapshot.commit(&state, reads, |_| unreachable!("stale listing applied")).is_err());
+        assert_eq!(with_scan(&state, |scan| scan.arena.len()), len, "nothing inserted");
+
+        // From the top, as apply_batch retries: a fresh listing without `x`.
+        assert_eq!(apply(&state, batch), vec![vec![id_of(&state, &a)]]);
+        assert_eq!(id_of(&state, &x), NONE);
+        assert_fresh(&state, &root);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_deleted_root_empties_the_scan() {
+        for (tag, rescan) in [("root-gone", false), ("root-gone-rescan", true)] {
+            let root = temp_root(tag);
+            let state = state_for(&root);
+            fs::remove_dir_all(&root).unwrap();
+            // FSEvents may report it as a rescan of the root, which covers the listing.
+            let batch =
+                Batch { dirs: vec![root.clone()], rescan: if rescan { vec![root.clone()] } else { Vec::new() } };
+            assert_eq!(apply(&state, batch), vec![vec![0]], "{tag}");
+            with_scan(&state, |scan| {
+                let a = &scan.arena;
+                assert_eq!((a.size[0], a.items[0]), (0, 0), "{tag}");
+                assert!((1..a.len() as NodeId).all(|i| is_gone(a, i)), "{tag}");
+            });
+            assert!(apply(&state, dirs(&[&root])).is_empty(), "{tag}: nothing left to remove");
+        }
+    }
+
+    #[test]
+    fn a_deleted_directory_named_alone_is_detached() {
+        let root = temp_root("dir-gone");
+        let state = state_for(&root);
+        let a = root.join("a");
+        let sub = a.join("sub");
+        let (a_id, sub_id) = (id_of(&state, &a), id_of(&state, &sub));
+
+        fs::remove_dir_all(&sub).unwrap();
+        assert_eq!(apply(&state, dirs(&[&sub])), vec![vec![a_id]]);
+        assert!(with_scan(&state, |scan| scan.arena.flags[sub_id as usize].contains(Flags::REMOVED)));
+        assert_fresh(&state, &root);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Protects anything named `*.secret` (rule 0) and the file `b` at the root (rule 1).
+    fn policy_for(root: &Path) -> Policy {
+        Policy::from_toml(&format!(
+            r#"
+            version = 1
+            [[rule]]
+            id = "secret"
+            kind = "protected"
+            reason = "A secret."
+            match = {{ suffix = ".secret" }}
+            [[rule]]
+            id = "b"
+            kind = "protected"
+            reason = "Keep b."
+            match = {{ path = "{}" }}
+            "#,
+            root.join("b").display()
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn nodes_added_live_are_matched_against_the_policy() {
+        let root = temp_root("policy");
+        let state = state_with(&root, policy_for(&root));
+        let a = root.join("a");
+
+        write(&a.join("k.secret"), 1_000);
+        fs::create_dir_all(a.join("vault")).unwrap();
+        write(&a.join("vault/deep.secret"), 2_000);
+        apply(&state, dirs(&[&a, &a.join("vault")]));
+        // One reconciled in, one grafted with its new directory.
+        for path in [a.join("k.secret"), a.join("vault/deep.secret")] {
+            let id = id_of(&state, &path);
+            assert_ne!(id, NONE, "{}", path.display());
+            with_scan(&state, |scan| {
+                assert!(scan.arena.flags[id as usize].contains(Flags::PROTECTED), "{}", path.display());
+                assert_eq!(scan.hits.rule(id), Some(0), "{}", path.display());
+            });
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_protected_path_recreated_after_deletion_is_protected_again() {
+        let root = temp_root("policy-pinned");
+        let state = state_with(&root, policy_for(&root));
+        let b = root.join("b");
+        let old = id_of(&state, &b);
+        assert!(with_scan(&state, |scan| scan.arena.flags[old as usize].contains(Flags::PROTECTED)));
+
+        fs::remove_file(&b).unwrap();
+        apply(&state, dirs(&[&root]));
+        write(&b, 4_096);
+        apply(&state, dirs(&[&root]));
+        let id = id_of(&state, &b);
+        assert!(id != NONE && id != old);
+        with_scan(&state, |scan| {
+            assert!(scan.arena.flags[id as usize].contains(Flags::PROTECTED));
+            assert_eq!(scan.hits.rule(id), Some(1));
+            let (items, refused) = plan_sweep(&state.policy, scan, vec![id]).unwrap();
+            assert!(items.is_empty());
+            assert_eq!(refused, vec![format!("{}: protected. Keep b.", b.display())]);
+        });
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_new_hard_link_to_a_scanned_file_counts_once() {
+        let root = temp_root("hardlink");
+        let state = state_for(&root);
+        let a = root.join("a");
+        let totals = |arena: &Arena| (arena.size[0], arena.items[0]);
+        let fresh = || totals(&walk(&root).unwrap().0);
+        let dup = |path: &Path| {
+            let id = id_of(&state, path);
+            with_scan(&state, |scan| scan.arena.flags[id as usize].contains(Flags::HARDLINK_DUP))
+        };
+
+        // One link reconciled in, one grafted with its new directory.
+        fs::hard_link(a.join("x"), a.join("sub/x2")).unwrap();
+        fs::create_dir_all(a.join("linked")).unwrap();
+        fs::hard_link(a.join("y"), a.join("linked/y2")).unwrap();
+        apply(&state, dirs(&[&a, &a.join("sub"), &a.join("linked")]));
+        assert_eq!(with_scan(&state, |scan| totals(&scan.arena)), fresh());
+        assert!(dup(&a.join("sub/x2")) && dup(&a.join("linked/y2")));
+
+        // The counted link goes; the registry hands its bytes to the one left.
+        fs::remove_file(a.join("x")).unwrap();
+        apply(&state, dirs(&[&a]));
+        assert_eq!(with_scan(&state, |scan| totals(&scan.arena)), fresh());
+        assert!(!dup(&a.join("sub/x2")));
         fs::remove_dir_all(&root).unwrap();
     }
 }

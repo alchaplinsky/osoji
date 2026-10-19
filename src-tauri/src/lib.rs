@@ -5,7 +5,8 @@ mod live;
 #[cfg(target_os = "macos")]
 mod zoom;
 
-use scan_core::{Arena, Cancel, ChildIndex, Flags, NodeId, Progress, ScanConfig, NONE};
+use scan_core::live::Hardlinks;
+use scan_core::{Arena, Cancel, ChildIndex, Flags, HardlinkSet, NodeId, Progress, ScanConfig, NONE};
 use scan_policy::{covering, Kind, Policy, PolicyContext, PolicyHits, Safety};
 use serde::Serialize;
 use std::cmp::Reverse;
@@ -16,15 +17,19 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{Manager, State};
 
 struct Scan {
     root: PathBuf,
     arena: Arena,
     index: ChildIndex,
     hits: PolicyHits,
+    /// Which nodes share an inode and which of them carries the bytes, kept current by live updates.
+    links: Hardlinks,
     /// Bytes and items Osoji moved to the Trash since the scan, which the arena no longer counts.
     swept: (u64, u32),
+    /// Bumped by every change to the arena, so a live update can tell its listings went stale (live.rs).
+    epoch: u64,
 }
 
 #[derive(Default)]
@@ -38,6 +43,10 @@ struct AppState {
     sweeping: AtomicBool,
     /// Keeps `scan` current with the disk; replaced along with it.
     watcher: Mutex<Option<scan_macos::Watcher>>,
+    /// Watcher batches held back while a scan runs, applied once its result is in place.
+    pending: Mutex<Option<Vec<scan_macos::Batch>>>,
+    /// Held for the whole of each live apply, so two never interleave their phases.
+    applying: Mutex<()>,
 }
 
 /// Why the UI should treat a node with care: "trash", "protected", "risky" or "unexpected".
@@ -250,15 +259,37 @@ async fn start_scan(
     if state.running.swap(true, Ordering::AcqRel) {
         return Err("a scan is already running".into());
     }
-    let canonical = match resolve_root(&root) {
-        Ok(p) => p,
-        Err(e) => {
-            state.running.store(false, Ordering::Release);
-            return Err(e);
-        }
-    };
+    // Cleared only once the queued batches are applied, so a next scan cannot start queueing over them.
+    let result = scan(&app, &state, root, threads, on_progress).await;
+    state.running.store(false, Ordering::Release);
+    result
+}
+
+async fn scan(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    root: String,
+    threads: Option<usize>,
+    on_progress: Channel<ProgressMsg>,
+) -> Result<ScanSummary, String> {
+    let canonical = resolve_root(&root)?;
+    // Before the watcher starts, so a stop during its half-second start already reaches the walk.
     let cancel = Arc::new(AtomicBool::new(false));
     *state.cancel.lock().unwrap() = Some(cancel.clone());
+    // The new watcher is live before the walk starts, so a change the walk misses is still reported;
+    // its batches, and the old watcher's, wait until the walk's result is in place.
+    *state.pending.lock().unwrap() = Some(Vec::new());
+    let watcher = {
+        let (app, root) = (app.clone(), canonical.clone());
+        tauri::async_runtime::spawn_blocking(move || live::watch(app, &root)).await
+    };
+    let watcher = match watcher.map_err(|e| e.to_string()).and_then(|w| w.map_err(|e| e.to_string())) {
+        Ok(w) => Some(w),
+        Err(e) => {
+            eprintln!("watch {}: {e}; the scan will not follow changes", canonical.display());
+            None
+        }
+    };
 
     let cfg = ScanConfig {
         root: canonical,
@@ -290,17 +321,18 @@ async fn start_scan(
 
     let task = {
         let (cfg, progress, cancel) = (cfg.clone(), progress.clone(), cancel.clone());
-        tauri::async_runtime::spawn_blocking(move || scan_macos::walk(&cfg, &progress, &cancel, &scan_core::HardlinkSet::default())).await
+        tauri::async_runtime::spawn_blocking(move || {
+            let links = HardlinkSet::default();
+            scan_macos::walk(&cfg, &progress, &cancel, &links).map(|arena| (arena, links.finish()))
+        })
+        .await
     };
     done.store(true, Ordering::Release);
     let _ = poller.join();
-    state.running.store(false, Ordering::Release);
     state.cancel.lock().unwrap().take();
 
-    let result = task.map_err(|e| e.to_string())?;
-    let mut arena = result.map_err(|e| e.to_string())?;
     let cancelled = cancel.load(Ordering::Relaxed);
-    let summary = ScanSummary {
+    let summary = |arena: &Arena| ScanSummary {
         root: root.clone(),
         entries: arena.len(),
         bytes: arena.size[0],
@@ -308,27 +340,40 @@ async fn start_scan(
         elapsed_ms: t0.elapsed().as_millis() as u64,
         cancelled,
     };
+    let walked = task.map_err(|e| e.to_string()).and_then(|r| r.map_err(|e| e.to_string()));
     // A stopped walk leaves every unfinished directory under-counted, so it never replaces the
-    // last complete scan.
-    if !cancelled {
-        let index = ChildIndex::build(&arena);
-        let ctx = PolicyContext { home: home_path(), now: unix_now() };
-        let hits = state.policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
-        {
-            let mut slot = state.scan.lock().unwrap();
-            *slot = Some(Scan { root: cfg.root.clone(), arena, index, hits, swept: (0, 0) });
-            state.generation.fetch_add(1, Ordering::AcqRel);
+    // last complete scan; that one stays current, and what was queued meanwhile is its.
+    let (mut arena, links) = match walked {
+        Ok(walked) if !cancelled => walked,
+        other => {
+            settle(app, watcher).await;
+            return other.map(|(arena, _)| summary(&arena));
         }
-        // Stop the old watcher before starting the next, so batches are only ever applied one at
-        // a time. Dropping joins its thread, which may be finishing a batch, so not on this one.
-        let old = state.watcher.lock().unwrap().take();
-        let _ = tauri::async_runtime::spawn_blocking(move || drop(old)).await;
-        let watcher = live::watch(app, &cfg.root)
-            .map_err(|e| eprintln!("watch {}: {e}; the scan will not follow changes", cfg.root.display()))
-            .ok();
-        *state.watcher.lock().unwrap() = watcher;
+    };
+    let summary = summary(&arena);
+    let index = ChildIndex::build(&arena);
+    let ctx = PolicyContext { home: home_path(), now: unix_now() };
+    let hits = state.policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
+    {
+        let mut slot = state.scan.lock().unwrap();
+        *slot = Some(Scan { root: cfg.root.clone(), arena, index, hits, links, swept: (0, 0), epoch: 0 });
+        state.generation.fetch_add(1, Ordering::AcqRel);
     }
+    let old = std::mem::replace(&mut *state.watcher.lock().unwrap(), watcher);
+    settle(app, old).await;
     Ok(summary)
+}
+
+/// Drop `watcher`, then apply the batches queued while a scan ran. Off the async thread: dropping
+/// joins the watcher's thread, which may be mid-batch, and applying lists and walks directories.
+/// After the drop, so nothing that watcher still delivers is left in the queue.
+async fn settle(app: &tauri::AppHandle, watcher: Option<scan_macos::Watcher>) {
+    let app = app.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        drop(watcher);
+        live::drain(&app.state::<AppState>(), live::notify(&app));
+    })
+    .await;
 }
 
 /// Canonical, because `Scan.root` is canonical and a home reached through a symlink must still match.
@@ -661,6 +706,7 @@ fn finish_sweep(
             continue;
         };
         let moved = scan.arena.mark_trashed(id);
+        scan.epoch += 1;
         bytes += moved;
         scan.swept = (scan.swept.0 + moved, scan.swept.1 + 1);
         let mut p = scan.arena.parent[id as usize];
@@ -872,7 +918,6 @@ pub fn run() {
             // animator so the page follows the frame instead of freezing (zoom.rs).
             #[cfg(target_os = "macos")]
             {
-                use tauri::Manager;
                 match app.get_webview_window("main").map(|w| w.ns_window()) {
                     Some(Ok(ns_window)) => zoom::install(ns_window),
                     Some(Err(e)) => eprintln!("zoom: no NSWindow for main ({e}); zoom stays native"),
@@ -915,7 +960,15 @@ mod tests {
         arena.aggregate();
         let index = ChildIndex::build(&arena);
         (
-            Scan { root: PathBuf::from("/tmp/root"), arena, index, hits: PolicyHits::default(), swept: (0, 0) },
+            Scan {
+                root: PathBuf::from("/tmp/root"),
+                arena,
+                index,
+                hits: PolicyHits::default(),
+                links: Hardlinks::default(),
+                swept: (0, 0),
+                epoch: 0,
+            },
             folder,
             file,
         )
@@ -981,7 +1034,15 @@ mod tests {
         let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
         (
             policy,
-            Scan { root: PathBuf::from("/tmp/root"), arena, index, hits, swept: (0, 0) },
+            Scan {
+                root: PathBuf::from("/tmp/root"),
+                arena,
+                index,
+                hits,
+                links: Hardlinks::default(),
+                swept: (0, 0),
+                epoch: 0,
+            },
             [trash, docs, old, report],
         )
     }
@@ -1061,7 +1122,15 @@ mod tests {
         let policy = Policy::from_toml(GUARD_POLICY).unwrap();
         let ctx = PolicyContext { home: PathBuf::new(), now: 0 };
         let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
-        let mut scan = Scan { root: PathBuf::from("/tmp/root"), arena, index, hits, swept: (0, 0) };
+        let mut scan = Scan {
+            root: PathBuf::from("/tmp/root"),
+            arena,
+            index,
+            hits,
+            links: Hardlinks::default(),
+            swept: (0, 0),
+            epoch: 0,
+        };
 
         assert_eq!(guard_of(&policy, &scan, keep), Some(Guard { kind: "protected", reason: "Keep it.".into() }));
         assert_eq!(guard_of(&policy, &scan, loose), Some(Guard { kind: "risky", reason: "Big file.".into() }));
@@ -1103,9 +1172,11 @@ mod tests {
         let root = resolve_root(link.to_str().unwrap()).unwrap();
         assert_eq!(root, fs::canonicalize(base.join("real")).unwrap());
         let cfg = ScanConfig { root: root.clone(), threads: 2, cross_mounts: false, qos: false };
-        let arena = scan_macos::walk(&cfg, &Progress::default(), &Cancel::new(false), &scan_core::HardlinkSet::default()).unwrap();
+        let links = HardlinkSet::default();
+        let arena = scan_macos::walk(&cfg, &Progress::default(), &Cancel::new(false), &links).unwrap();
         let index = ChildIndex::build(&arena);
-        let scan = Scan { root, arena, index, hits: PolicyHits::default(), swept: (0, 0) };
+        let scan =
+            Scan { root, arena, index, hits: PolicyHits::default(), links: links.finish(), swept: (0, 0), epoch: 0 };
 
         let f = find_node(&scan, &fs::canonicalize(link.join("sub/f")).unwrap());
         assert_ne!(f, NONE);
@@ -1138,7 +1209,8 @@ mod tests {
         let index = ChildIndex::build(&arena);
         let ctx = PolicyContext { home: home.to_path_buf(), now };
         let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
-        let scan = Scan { root: root.to_path_buf(), arena, index, hits, swept: (0, 0) };
+        let scan =
+            Scan { root: root.to_path_buf(), arena, index, hits, links: Hardlinks::default(), swept: (0, 0), epoch: 0 };
         collect_suggestions(&policy, &scan, &ctx)
     }
 
