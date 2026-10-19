@@ -47,8 +47,8 @@ impl Watcher {
         };
         // NoCache: the file-id cache would stat the whole tree up front just to stitch renames
         // together, and renames need no stitching here since both parents are reported anyway.
-        let mut debouncer = new_debouncer_opt(DEBOUNCE, None, handler, NoCache, notify::Config::default())
-            .map_err(io::Error::other)?;
+        let mut debouncer =
+            new_debouncer_opt(DEBOUNCE, None, handler, NoCache, notify::Config::default()).map_err(io::Error::other)?;
         debouncer.watch(&root, RecursiveMode::Recursive).map_err(io::Error::other)?;
         Ok(Watcher { debouncer: Some(debouncer) })
     }

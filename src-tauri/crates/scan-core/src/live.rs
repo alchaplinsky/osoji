@@ -20,6 +20,55 @@ pub struct DirEntry {
     pub mtime: i64,
     /// `DIR`, `SYMLINK`, `MOUNT` and `ERROR` as the walkers would set them; policy flags are never set here.
     pub flags: Flags,
+    pub dev: u64,
+    pub ino: u64,
+    /// Link count; above 1 the entry shares its inode, and `Hardlinks` decides which node counts.
+    pub nlink: u32,
+}
+
+/// Which scanned nodes share an inode (`nlink > 1`), and which of them carries the bytes.
+/// Filled by the walkers through `HardlinkSet`, then kept current by `reconcile`.
+#[derive(Default, Debug)]
+pub struct Hardlinks {
+    /// Every scanned node of a multiply-linked inode; the first carries the bytes, the rest are
+    /// `HARDLINK_DUP` at size 0.
+    members: HashMap<(u64, u64), Vec<NodeId>>,
+    inode_of: HashMap<NodeId, (u64, u64)>,
+}
+
+impl Hardlinks {
+    /// Walkers call this for every entry with `nlink > 1`, in any order across threads: the
+    /// counted node goes first whenever it is recorded.
+    pub fn add(&mut self, dev: u64, ino: u64, id: NodeId, counted: bool) {
+        let m = self.members.entry((dev, ino)).or_default();
+        if counted {
+            m.insert(0, id);
+        } else {
+            m.push(id);
+        }
+        self.inode_of.insert(id, (dev, ino));
+    }
+
+    pub fn inode(&self, id: NodeId) -> Option<(u64, u64)> {
+        self.inode_of.get(&id).copied()
+    }
+
+    /// The node that carries this inode's bytes, if the scan holds any link to it.
+    pub fn counted(&self, dev: u64, ino: u64) -> Option<NodeId> {
+        self.members.get(&(dev, ino)).and_then(|m| m.first().copied())
+    }
+
+    pub fn members(&self, dev: u64, ino: u64) -> &[NodeId] {
+        self.members.get(&(dev, ino)).map_or(&[], Vec::as_slice)
+    }
+
+    pub fn len(&self) -> usize {
+        self.inode_of.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inode_of.is_empty()
+    }
 }
 
 /// What `reconcile` did to one directory's children.
@@ -59,7 +108,13 @@ pub fn is_gone(arena: &Arena, mut id: NodeId) -> bool {
 /// the watcher reports as a separate directory.
 ///
 /// Does nothing when `dir` or an ancestor is gone: a deleted tree also reports its subdirectories.
-pub fn reconcile(arena: &mut Arena, index: &ChildIndex, dir: NodeId, listing: &[DirEntry]) -> Reconciled {
+pub fn reconcile(
+    arena: &mut Arena,
+    index: &ChildIndex,
+    _links: &mut Hardlinks,
+    dir: NodeId,
+    listing: &[DirEntry],
+) -> Reconciled {
     let mut out = Reconciled::default();
     if is_gone(arena, dir) {
         return out;
@@ -155,16 +210,19 @@ mod tests {
                 size: arena.size[c],
                 mtime: arena.mtime[c],
                 flags: arena.flags[c] & kind,
+                dev: 0,
+                ino: 0,
+                nlink: 1,
             })
             .collect()
     }
 
     fn file(name: &str, size: u64) -> DirEntry {
-        DirEntry { name: name.into(), size, mtime: 1, flags: Flags::empty() }
+        DirEntry { name: name.into(), size, mtime: 1, flags: Flags::empty(), dev: 0, ino: 0, nlink: 1 }
     }
 
     fn dir(name: &str) -> DirEntry {
-        DirEntry { name: name.into(), size: 64, mtime: 1, flags: Flags::DIR }
+        DirEntry { name: name.into(), size: 64, mtime: 1, flags: Flags::DIR, dev: 0, ino: 0, nlink: 1 }
     }
 
     fn without(mut list: Vec<DirEntry>, name: &str) -> Vec<DirEntry> {
@@ -183,7 +241,7 @@ mod tests {
         let (mut arena, index) = setup();
         let (a, x) = (node(&arena, "a"), node(&arena, "a/x"));
         let list = without(listing(&arena, &index, a), "x");
-        let r = reconcile(&mut arena, &index, a, &list);
+        let r = reconcile(&mut arena, &index, &mut Hardlinks::default(), a, &list);
         assert_eq!(r, Reconciled { removed: vec![x], ..Default::default() });
         assert!(arena.flags[x as usize].contains(Flags::REMOVED));
         assert_matches(&arena, &[("a/", 64), ("a/y", 200), ("a/sub/", 64), ("a/sub/z", 300), ("b", 50)]);
@@ -194,7 +252,7 @@ mod tests {
         let (mut arena, index) = setup();
         let (a, sub) = (node(&arena, "a"), node(&arena, "a/sub"));
         let list = without(listing(&arena, &index, a), "sub");
-        let r = reconcile(&mut arena, &index, a, &list);
+        let r = reconcile(&mut arena, &index, &mut Hardlinks::default(), a, &list);
         assert_eq!(r.removed, vec![sub]);
         assert_matches(&arena, &[("a/", 64), ("a/x", 100), ("a/y", 200), ("b", 50)]);
     }
@@ -204,8 +262,8 @@ mod tests {
         let (mut arena, index) = setup();
         let (a, sub) = (node(&arena, "a"), node(&arena, "a/sub"));
         let list = without(listing(&arena, &index, a), "sub");
-        reconcile(&mut arena, &index, a, &list);
-        assert!(reconcile(&mut arena, &index, sub, &[]).is_empty());
+        reconcile(&mut arena, &index, &mut Hardlinks::default(), a, &list);
+        assert!(reconcile(&mut arena, &index, &mut Hardlinks::default(), sub, &[]).is_empty());
         assert_matches(&arena, &[("a/", 64), ("a/x", 100), ("a/y", 200), ("b", 50)]);
     }
 
@@ -215,7 +273,7 @@ mod tests {
         let (a, x) = (node(&arena, "a"), node(&arena, "a/x"));
         let mut list = without(listing(&arena, &index, a), "x");
         list.push(DirEntry { mtime: 2, ..file("x", 150) });
-        let r = reconcile(&mut arena, &index, a, &list);
+        let r = reconcile(&mut arena, &index, &mut Hardlinks::default(), a, &list);
         assert_eq!(r, Reconciled { changed: vec![x], ..Default::default() });
         assert_eq!(arena.mtime[x as usize], 2);
         assert_matches(&arena, &[("a/", 64), ("a/x", 150), ("a/y", 200), ("a/sub/", 64), ("a/sub/z", 300), ("b", 50)]);
@@ -226,7 +284,7 @@ mod tests {
         let (mut arena, index) = setup();
         let mut list = listing(&arena, &index, 0);
         list.push(file("c", 70));
-        let r = reconcile(&mut arena, &index, 0, &list);
+        let r = reconcile(&mut arena, &index, &mut Hardlinks::default(), 0, &list);
         assert_eq!(r, Reconciled { added: vec![node(&arena, "c")], ..Default::default() });
         assert_matches(&arena, &[BASE, &[("c", 70)]].concat());
     }
@@ -236,7 +294,7 @@ mod tests {
         let (mut arena, index) = setup();
         let mut list = listing(&arena, &index, 0);
         list.push(dir("d"));
-        let r = reconcile(&mut arena, &index, 0, &list);
+        let r = reconcile(&mut arena, &index, &mut Hardlinks::default(), 0, &list);
         let d = node(&arena, "d");
         assert_eq!(r, Reconciled { new_dirs: vec![d], ..Default::default() });
 
@@ -263,7 +321,7 @@ mod tests {
         let (a, x) = (node(&arena, "a"), node(&arena, "a/x"));
         let mut list = without(listing(&arena, &index, a), "x");
         list.push(file("x2", 100));
-        let r = reconcile(&mut arena, &index, a, &list);
+        let r = reconcile(&mut arena, &index, &mut Hardlinks::default(), a, &list);
         assert_eq!(r, Reconciled { removed: vec![x], added: vec![node(&arena, "a/x2")], ..Default::default() });
         assert_matches(&arena, &[("a/", 64), ("a/x2", 100), ("a/y", 200), ("a/sub/", 64), ("a/sub/z", 300), ("b", 50)]);
     }
@@ -273,10 +331,16 @@ mod tests {
         let (mut arena, index) = setup();
         let b = node(&arena, "b");
         let list = listing(&arena, &index, 0);
-        reconcile(&mut arena, &index, 0, &without(list.clone(), "b"));
+        reconcile(&mut arena, &index, &mut Hardlinks::default(), 0, &without(list.clone(), "b"));
 
         let index = ChildIndex::build(&arena);
-        let r = reconcile(&mut arena, &index, 0, &[without(list, "b"), vec![file("b", 80)]].concat());
+        let r = reconcile(
+            &mut arena,
+            &index,
+            &mut Hardlinks::default(),
+            0,
+            &[without(list, "b"), vec![file("b", 80)]].concat(),
+        );
         assert_eq!(r.added.len(), 1);
         assert_ne!(r.added[0], b);
         assert!(r.removed.is_empty() && r.changed.is_empty());
@@ -289,7 +353,7 @@ mod tests {
         let (a, sub) = (node(&arena, "a"), node(&arena, "a/sub"));
         let mut list = without(listing(&arena, &index, a), "sub");
         list.push(file("sub", 7));
-        let r = reconcile(&mut arena, &index, a, &list);
+        let r = reconcile(&mut arena, &index, &mut Hardlinks::default(), a, &list);
         assert_eq!(r, Reconciled { removed: vec![sub], added: vec![node(&arena, "a/sub")], ..Default::default() });
         assert_matches(&arena, &[("a/", 64), ("a/x", 100), ("a/y", 200), ("a/sub", 7), ("b", 50)]);
     }
@@ -301,11 +365,11 @@ mod tests {
         let mut list = without(listing(&arena, &index, a), "y");
         list.retain(|e| e.name != b"x");
         list.extend([file("x", 1), file("w", 2), dir("new")]);
-        assert!(!reconcile(&mut arena, &index, a, &list).is_empty());
+        assert!(!reconcile(&mut arena, &index, &mut Hardlinks::default(), a, &list).is_empty());
         let after = dump(&arena);
 
         let index = ChildIndex::build(&arena);
-        assert!(reconcile(&mut arena, &index, a, &list).is_empty());
+        assert!(reconcile(&mut arena, &index, &mut Hardlinks::default(), a, &list).is_empty());
         assert_eq!(dump(&arena), after);
     }
 
@@ -346,7 +410,7 @@ mod tests {
         }
         list.extend((0..100).map(|k| file(&format!("new{k}"), 4096)));
         let t = Instant::now();
-        let r = reconcile(&mut arena, &index, big, &list);
+        let r = reconcile(&mut arena, &index, &mut Hardlinks::default(), big, &list);
         let rec = t.elapsed();
         assert_eq!((r.removed.len(), r.changed.len(), r.added.len()), (100, 100, 100));
 
