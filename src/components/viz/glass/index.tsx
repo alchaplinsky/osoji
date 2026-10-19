@@ -6,7 +6,7 @@ export { styles as glass };
 /** Inline style that tints a glass piece with its chart colour. */
 export const tint = (color: string, style?: CSSProperties) => ({ "--seg": color, ...style }) as CSSProperties;
 
-type Paint = "gloss" | "lens" | "binned" | "hidden";
+type Paint = "gloss" | "lens" | "binned" | "hidden" | "glow" | "halo";
 
 /** Ids for one SVG chart's GlassDefs, unique on the page; `paint(name)` is the matching `url(#…)`. */
 export function usePaints() {
@@ -20,7 +20,25 @@ const stripes = (id: string, color: string) => (
   </pattern>
 );
 
-/** Gradients and patterns the SVG charts paint with: the top gloss, the lens behind a dial, and two hatches. */
+/** The glow filter for an SVG piece: a bright one when hovered, else a soft halo where `halo` asks for it. */
+export const glowOf = (paint: (name: Paint) => string, hovered: boolean, halo: boolean) =>
+  hovered ? paint("glow") : halo ? paint("halo") : undefined;
+
+/** A glow in the shape's own colour: its blur, at `strength` opacity, laid under the shape. */
+const glow = (id: string, blur: number, strength: number) => (
+  <filter id={id} filterUnits="userSpaceOnUse" x="-10%" y="-10%" width="120%" height="120%" colorInterpolationFilters="sRGB">
+    <feGaussianBlur in="SourceGraphic" stdDeviation={blur} result="blur" />
+    <feComponentTransfer in="blur" result="halo">
+      <feFuncA type="linear" slope={strength} />
+    </feComponentTransfer>
+    <feMerge>
+      <feMergeNode in="halo" />
+      <feMergeNode in="SourceGraphic" />
+    </feMerge>
+  </filter>
+);
+
+/** Gradients, patterns and filters the SVG charts paint with: the top gloss, the lens behind a dial, two hatches and two glows. */
 export function GlassDefs({ id, neutral }: { id: string; neutral: string }) {
   return (
     <defs>
@@ -35,6 +53,8 @@ export function GlassDefs({ id, neutral }: { id: string; neutral: string }) {
       </radialGradient>
       {stripes(`${id}-binned`, "var(--hatch-line)")}
       {stripes(`${id}-hidden`, neutral)}
+      {glow(`${id}-glow`, 6, 0.9)}
+      {glow(`${id}-halo`, 4, 0.35)}
     </defs>
   );
 }
