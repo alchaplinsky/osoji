@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { ViewNode } from "../../../lib/api";
 import type { HoverId } from "../../../lib/types";
+import { isTrash } from "../../../lib/bin";
 import { humanBytes } from "../../../lib/format";
 import { pathTo } from "../../../lib/tree";
 import { visibleSlices, type Slice } from "../../../screens/Breakdown/slices";
@@ -44,6 +45,7 @@ export default function Shelf({ view, theme, hoverId, onHover, onDrill, onSelect
                   styles.segment,
                   glass.piece,
                   !slice.node && styles.rest,
+                (!slice.node || isTrash(slice.node)) && glass.muted,
                   hoverId !== null && hoverId === slice.hover && cx(styles.lifted, glass.hovered),
                   binned.has(slice.key) && glass.binned,
                 )}

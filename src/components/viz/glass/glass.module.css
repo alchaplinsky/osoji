@@ -1,40 +1,27 @@
-/* A translucent HTML chart piece tinted by its `--seg` colour: hairline edge, top gloss and a soft halo in its
-   own colour. A chart can add a transition of its own through `--piece-transition`, and must position the piece. */
+/* A glass HTML chart piece tinted by its `--seg` colour: hairline edge, top gloss and a soft halo in its own
+   colour, lettered in a dark ink of its own hue. A chart can add a transition of its own through
+   `--piece-transition`. */
 .piece {
-  isolation: isolate;
   background: linear-gradient(165deg, color-mix(in oklch, var(--seg) var(--glass-hi), transparent), color-mix(in oklch, var(--seg) var(--glass-lo), transparent));
   border: 1px solid var(--glass-edge);
   box-shadow: inset 0 1px 0 var(--glass-gloss), 0 6px 18px color-mix(in oklch, var(--seg) var(--glass-glow), transparent);
-  color: var(--seg-fg);
+  color: color-mix(in oklch, var(--seg) 22%, #0B0A09);
   transition:
     opacity .25s,
     transform .32s var(--ease-glide),
     box-shadow .32s var(--ease-glide),
     border-color .32s var(--ease-glide),
-    color .32s var(--ease-glide),
     var(--piece-transition, background 0s);
 }
 
-/* The hover gradient lives on an overlay that fades in, as browsers cannot animate one gradient into another.
-   It sits under the piece's content: `isolation` keeps its negative z-index inside the piece. */
-.piece::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-  background: linear-gradient(165deg, color-mix(in oklch, var(--seg) var(--glass-hover-hi), transparent), color-mix(in oklch, var(--seg) var(--glass-hover-lo), transparent));
-  opacity: 0;
-  transition: opacity .32s var(--ease-glide);
-}
-
-/* Near-solid, lettered in a dark ink of its own hue. Each chart adds its own lift (a scale about the right origin). */
+/* Hover keeps the fill: a brighter edge and a stronger glow. Each chart adds its own lift (a scale about the right origin). */
 .hovered {
   border-color: var(--glass-edge-hover);
   box-shadow: inset 0 1px 0 var(--glass-gloss), 0 12px 26px color-mix(in oklch, var(--seg) var(--glass-glow-hover), transparent);
-  color: color-mix(in oklch, var(--seg) 22%, #0B0A09);
 }
-.hovered::before { opacity: 1; }
+
+/* Neutral pieces (smaller items, the Trash) are dark grey on dark themes, so they keep the theme's text colour. */
+.muted { color: var(--fg); }
 
 /* In the bin: a hatched slot where the piece was. */
 .binned {
@@ -43,7 +30,6 @@
   box-shadow: none;
   color: var(--fg2);
 }
-.binned::before { display: none; }
 
 /* The same look for SVG shapes: a flat tint, with the gloss drawn on top by a second shape. Glows are GlassDefs
    filters set as attributes: WebKit ignores CSS filter functions on shapes inside an SVG. */
@@ -51,12 +37,9 @@
   fill: color-mix(in oklch, var(--seg) var(--glass-hi), transparent);
   stroke: var(--glass-edge);
   stroke-width: 1;
-  transition: fill .32s var(--ease-glide), stroke .32s var(--ease-glide);
+  transition: stroke .32s var(--ease-glide);
 }
-.hovered .shape {
-  fill: color-mix(in oklch, var(--seg) var(--glass-hover-hi), transparent);
-  stroke: var(--glass-edge-hover);
-}
+.hovered .shape { stroke: var(--glass-edge-hover); }
 .binned .shape {
   stroke: var(--line2);
   stroke-dasharray: 3 3;

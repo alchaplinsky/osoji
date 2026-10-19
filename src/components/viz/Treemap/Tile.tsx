@@ -1,4 +1,5 @@
 import type { DragEvent, MouseEventHandler } from "react";
+import { isTrash } from "../../../lib/bin";
 import { humanBytes } from "../../../lib/format";
 import type { Slice } from "../../../screens/Breakdown/slices";
 import { Mono, cx } from "../../ui";
@@ -45,7 +46,7 @@ export default function Tile({ slice, cell, hovered, binned, opacity, ...handler
 
   return (
     <div
-      className={cx(styles.tile, glass.piece, node && (node.dir ? styles.dir : styles.file), hovered && cx(styles.lifted, glass.hovered), binned && glass.binned)}
+      className={cx(styles.tile, glass.piece, (!node || isTrash(node)) && glass.muted, node && (node.dir ? styles.dir : styles.file), hovered && cx(styles.lifted, glass.hovered), binned && glass.binned)}
       style={tint(slice.fill, { left: cell.x + GAP / 2, top: cell.y + GAP / 2, width: w, height: h, opacity })}
       {...handlers}
     >
