@@ -7,6 +7,7 @@ import { relatedOpacity, type SliceKey } from "../../Sunburst/layout";
 import { Eyebrow, Mono, cx } from "../../ui";
 import { glass, tint } from "../glass";
 import { pointerProps, type PointerActions } from "../interact";
+import { MIN_SHARE } from "./share";
 import styles from "./Shelf.module.css";
 
 type InsideBarProps = {
@@ -22,7 +23,7 @@ const KIDS = 12;
 const LABEL_SHARE = 13;
 
 export default function InsideBar({ focus, theme, hoverId, related, binned, actions }: InsideBarProps) {
-  const kids = focus.children.slice(0, KIDS);
+  const kids = focus.children.slice(0, KIDS).filter((child) => focus.size > 0 && child.size / focus.size >= MIN_SHARE);
   return (
     <div>
       <div className={styles.insideHead}>

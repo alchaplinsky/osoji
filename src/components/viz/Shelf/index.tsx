@@ -13,11 +13,12 @@ import type { VizProps } from "../types";
 import { cameraBox, nestBox, useZoom, type Box } from "../zoom";
 import InsideBar from "./InsideBar";
 import Legend from "./Legend";
+import { MIN_SHARE } from "./share";
 import styles from "./Shelf.module.css";
 
 const LABEL_SHARE = 10;
 /** Space between segments, in px. */
-const GAP = 4;
+const GAP = 2;
 /** The bar as a box in percent: segments are spans along x. */
 const WHOLE: Box = { x: 0, y: 0, w: 100, h: 1 };
 const EDGE = 0.01;
@@ -45,7 +46,7 @@ function focusOf(view: ViewNode, slices: Slice[], hoverId: HoverId): ViewNode | 
 }
 
 export default function Shelf({ view, theme, hoverId, onHover, onDrill, onSelectFile, onDragStart, onContextMenu, binIds, className }: VizProps) {
-  const slices = useMemo(() => visibleSlices(view, theme), [view, theme]);
+  const slices = useMemo(() => visibleSlices(view, theme, 14, MIN_SHARE), [view, theme]);
   const related = useMemo(() => relatedKeys(view, hoverId), [view, hoverId]);
   const zoom = useZoom(view, null);
   const { outer, inner, path } = zoom ?? {};
@@ -56,10 +57,10 @@ export default function Shelf({ view, theme, hoverId, onHover, onDrill, onSelect
   // Both views laid out once per move: the outer one along the bar, the inner one inside the segment it zooms from.
   const world = useMemo(() => {
     if (!outer || !inner || !path) return null;
-    const outerSpans = spansOf(outer, visibleSlices(outer, theme));
+    const outerSpans = spansOf(outer, visibleSlices(outer, theme, 14, MIN_SHARE));
     const pivot = outerSpans.find((s) => s.slice.key === path[1].id);
     if (!pivot) return null;
-    const innerSpans = spansOf(inner, visibleSlices(inner, theme)).map((s) => ({ ...s, ...nestBox(s, WHOLE, pivot) }));
+    const innerSpans = spansOf(inner, visibleSlices(inner, theme, 14, MIN_SHARE)).map((s) => ({ ...s, ...nestBox(s, WHOLE, pivot) }));
     return { outerSpans, innerSpans, pivot };
   }, [outer, inner, path, theme]);
 

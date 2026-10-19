@@ -20,7 +20,6 @@
   min-width: 3px;
   display: flex;
   align-items: flex-end;
-  padding: 10px 12px;
   overflow: hidden;
   cursor: pointer;
   border-radius: 6px;
@@ -34,7 +33,11 @@
 .zooming { overflow: hidden; }
 .zooming .segment { transition: none; }
 
-.segmentLabel { min-width: 0; }
+/* Padding lives on the label, not the segment, so a thin segment can be as narrow as its share. */
+.segmentLabel {
+  min-width: 0;
+  padding: 10px 12px;
+}
 
 .segmentName {
   font-size: 12.5px;
@@ -107,7 +110,7 @@
 .insideBar {
   display: flex;
   height: 44px;
-  gap: 4px;
+  gap: 2px;
 }
 
 .insideSegment {
@@ -115,7 +118,6 @@
   min-width: 3px;
   display: flex;
   align-items: center;
-  padding: 0 10px;
   overflow: hidden;
   cursor: pointer;
   border-radius: 6px;
@@ -124,6 +126,7 @@
 .insideSegment:last-child { border-top-right-radius: 12px; border-bottom-right-radius: 12px; }
 
 .insideLabel {
+  padding: 0 10px;
   font-size: 11.5px;
   font-weight: 700;
   white-space: nowrap;
