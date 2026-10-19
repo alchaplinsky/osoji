@@ -40,7 +40,8 @@ export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp,
       {size.w > 0 && size.h > 0 && (
         <svg className={styles.svg} width={size.w} height={size.h}>
           <GlassDefs id={id} neutral={neutral(theme)} />
-          <circle className={styles.lens} cx={g.cx} cy={g.cy} r={g.r0 + MAX_DEPTH * g.ring + 4} style={{ fill: paint("lens") }} />
+          {/* One gap past the outer ring, as in the prototype. */}
+          <circle className={styles.lens} cx={g.cx} cy={g.cy} r={g.r0 + MAX_DEPTH * g.ring} style={{ fill: paint("lens") }} />
           {arcs.map((arc) => {
             const d = arcPath(g, arc);
             if (!d) return null;
