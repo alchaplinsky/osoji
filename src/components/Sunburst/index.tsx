@@ -1,87 +1,69 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import type { ThemeName } from "../../design/theme";
+import { useId, useMemo } from "react";
+import { neutral } from "../../design/palette";
 import type { ViewNode } from "../../lib/api";
 import type { HoverId } from "../../lib/types";
+import { humanBytes, humanPercent } from "../../lib/format";
 import { useElementSize } from "../../hooks/useElementSize";
+import { nodeFill, nodeName } from "../../screens/Breakdown/slices";
 import { cx } from "../ui";
 import CenterLabel from "../viz/CenterLabel";
-import { layoutArcs, relatedKeys, type Arc } from "./layout";
-import { draw, geometry, hitTest, readColors } from "./draw";
+import { pointerProps } from "../viz/interact";
+import type { Disk, VizProps } from "../viz/types";
+import { arcPath, geometry } from "./geometry";
+import { TAU, layoutArcs, otherKey, relatedKeys, relatedOpacity, type Arc } from "./layout";
 import styles from "./Sunburst.module.css";
 
-type SunburstProps = {
-  view: ViewNode;
-  theme: ThemeName;
-  hoverId: HoverId;
-  onHover: (id: HoverId) => void;
-  onDrill: (id: number) => void;
-  onUp: () => void;
-  onSelectFile?: (id: number) => void;
-  onContextMenu?: (e: MouseEvent, id: number) => void;
-  centerSize?: number;
-  className?: string;
-};
+/** The centre readout: the hovered arc and its share of the circle, else the circle's whole. */
+function centerOf(view: ViewNode, disk: Disk | undefined, arcs: Arc[], hoverId: HoverId) {
+  const key = hoverId === "other" ? otherKey(view.id) : hoverId;
+  const hovered = arcs.find((a) => a.key === key);
+  if (hovered) return { name: hovered.name, size: hovered.size, note: humanPercent(((hovered.a1 - hovered.a0) / TAU) * 100) };
+  if (!disk) return { name: nodeName(view), size: view.size };
+  const used = disk.total - disk.free;
+  return { name: disk.name, size: used, note: `${humanPercent((used / disk.total) * 100)} of ${humanBytes(disk.total)}` };
+}
 
-export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp, onSelectFile, onContextMenu, centerSize = 20, className }: SunburstProps) {
+export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp, onSelectFile, onContextMenu, disk, centerSize = 20, className }: VizProps) {
   const [rootRef, size] = useElementSize<HTMLDivElement>();
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [pointer, setPointer] = useState(false);
-  const arcs = useMemo(() => layoutArcs(view), [view]);
+  // useId() contains colons, which break url(#…) references in WebKit.
+  const hatchId = useId().replace(/:/g, "");
+  const arcs = useMemo(() => layoutArcs(view, disk), [view, disk]);
   const related = useMemo(() => relatedKeys(view, hoverId), [view, hoverId]);
+  const g = geometry(size.w, size.h);
+  const actions = { onHover, onDrill, onSelectFile, onContextMenu };
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || size.w === 0 || size.h === 0) return;
-    // Deferred so theme variables applied by ancestor effects are in place before colours are read.
-    const frame = requestAnimationFrame(() => {
-      const dpr = window.devicePixelRatio || 1;
-      const w = Math.round(size.w * dpr);
-      const h = Math.round(size.h * dpr);
-      if (canvas.width !== w || canvas.height !== h) {
-        canvas.width = w;
-        canvas.height = h;
-      }
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, size.w, size.h);
-      draw(ctx, arcs, geometry(size.w, size.h), theme, related, readColors(canvas));
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [arcs, related, size, theme]);
-
-  function locate(e: MouseEvent): Arc | "center" | null {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return hitTest(arcs, geometry(size.w, size.h), e.clientX - rect.left, e.clientY - rect.top);
-  }
+  const fill = (arc: Arc) => {
+    if (arc.node) return nodeFill(arc.node, theme, arc.index, arc.depth);
+    if (arc.key === "hidden") return `url(#${hatchId})`;
+    return arc.key === "free" ? undefined : neutral(theme);
+  };
 
   return (
     <div ref={rootRef} className={cx(styles.root, className)}>
-      <canvas
-        ref={canvasRef}
-        className={cx(styles.canvas, pointer && styles.pointer)}
-        onMouseMove={(e) => {
-          const hit = locate(e);
-          setPointer(hit !== null);
-          const id = hit && hit !== "center" ? hit.hover : null;
-          if (id !== hoverId) onHover(id);
-        }}
-        onMouseLeave={() => {
-          setPointer(false);
-          if (hoverId !== null) onHover(null);
-        }}
-        onClick={(e) => {
-          const hit = locate(e);
-          if (hit === "center") onUp();
-          else if (hit?.node?.dir) onDrill(hit.node.id);
-          else if (hit?.node) onSelectFile?.(hit.node.id);
-        }}
-        onContextMenu={(e) => {
-          const hit = locate(e);
-          if (hit && hit !== "center" && hit.node) onContextMenu?.(e, hit.node.id);
-        }}
-      />
-      <CenterLabel view={view} size={centerSize} />
+      {size.w > 0 && size.h > 0 && (
+        <svg className={styles.svg} width={size.w} height={size.h}>
+          <defs>
+            <pattern id={hatchId} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <rect width="2" height="6" fill={neutral(theme)} />
+            </pattern>
+          </defs>
+          {arcs.map((arc) => {
+            const d = arcPath(g, arc);
+            if (!d) return null;
+            return (
+              <path
+                key={arc.key}
+                d={d}
+                className={cx(styles.arc, arc.node && styles.node, arc.key === "free" && styles.free)}
+                style={{ fill: fill(arc), opacity: relatedOpacity(related, arc.key) }}
+                {...pointerProps(arc.node, arc.hover, actions)}
+              />
+            );
+          })}
+          <circle className={styles.hole} cx={g.cx} cy={g.cy} r={g.r0 - g.gap} onClick={onUp} />
+        </svg>
+      )}
+      <CenterLabel {...centerOf(view, disk, arcs, hoverId)} fontSize={centerSize} />
     </div>
   );
 }

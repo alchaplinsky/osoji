@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { relatedKeys } from "../Sunburst/layout";
+import { TAU, layoutArcs, relatedKeys } from "../Sunburst/layout";
+import { diskOf } from "../../screens/Breakdown/CapacityBar/capacity";
 import type { ViewNode } from "../../lib/api";
 import { neutral, tone } from "../../design/palette";
 import { slicesOf, visibleSlices } from "../../screens/Breakdown/slices";
@@ -8,6 +9,9 @@ import { squarify } from "./Treemap/squarify";
 function node(id: number, size: number, children: ViewNode[] = [], other = 0, otherCount = 0): ViewNode {
   return { id, name: `node-${id}`, size, items: children.length, dir: children.length > 0, error: false, children, other, other_count: otherCount };
 }
+
+/** An angle as a share of the full circle, rounded off float noise. */
+const share = (angle: number) => Math.round((angle / TAU) * 1e6) / 1e6;
 
 describe("visualization layout", () => {
   test("merges filtered children and the backend tail once", () => {
@@ -53,5 +57,43 @@ describe("visualization layout", () => {
 
     expect(cells.reduce((area, cell) => area + cell.w * cell.h, 0)).toBeCloseTo(20_000, 6);
     expect(cells.every((cell) => cell.x >= 0 && cell.y >= 0 && cell.x + cell.w <= 200 && cell.y + cell.h <= 100)).toBe(true);
+  });
+
+  test("a folder view fills the whole circle", () => {
+    const view = node(0, 100, [node(1, 60), node(2, 40)]);
+    const arcs = layoutArcs(view);
+
+    expect(arcs.map((a) => [share(a.a0), share(a.a1)])).toEqual([
+      [0, 0.6],
+      [0.6, 1],
+    ]);
+  });
+
+  test("a disk view spans the disk, with not-scanned and free space after the scanned items", () => {
+    const root = { ...node(0, 300, [node(1, 200), node(2, 100)]), name: "/" };
+    const disk = diskOf({ name: "Macintosh HD", mount: "/", total: 1000, free: 600 }, root, root);
+    const arcs = layoutArcs(root, disk);
+
+    expect(disk).toEqual({ name: "Macintosh HD", total: 1000, hidden: 100, free: 600 });
+    expect(arcs.map((a) => [a.key, share(a.a1 - a.a0)])).toEqual([
+      [1, 0.2],
+      [2, 0.1],
+      ["hidden", 0.1],
+      ["free", 0.6],
+    ]);
+    expect(share(arcs.at(-1)?.a1 ?? 0)).toBe(1);
+  });
+
+  test("only the volume root of a disk scan spans the disk", () => {
+    const child = node(1, 200);
+    const root = { ...node(0, 300, [child]), name: "/" };
+    const volume = { name: "Macintosh HD", mount: "/", total: 1000, free: 600 };
+
+    expect(diskOf(volume, root, child)).toBeUndefined();
+    expect(diskOf(volume, { ...root, name: "/Users/me" }, root)).toBeUndefined();
+  });
+
+  test("hovering free space relates only to itself", () => {
+    expect(relatedKeys(node(0, 100, [node(1, 100)]), "free")).toEqual(new Set(["free"]));
   });
 });

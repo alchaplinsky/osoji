@@ -4,7 +4,10 @@ export type Viz = "sunburst" | "treemap" | "shelf" | "orbit";
 
 export type Volume = { name: string; mount: string; total: number; free: number };
 
-export type HoverId = number | "other" | null;
+/** Disk space outside the scan: used space the scan could not see, and free space. */
+export type DiskExtra = "hidden" | "free";
+
+export type HoverId = number | "other" | DiskExtra | null;
 
 /** Why a node needs care, from the backend policy: protected items and the Trash never reach the bin, risky ones ask twice. */
 export type Guard = { kind: "protected" | "risky" | "unexpected" | "trash"; reason: string };

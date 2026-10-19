@@ -8,11 +8,27 @@
   animation: var(--kf-popIn) .5s var(--ease-spring-soft);
 }
 
-.canvas {
+.svg {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
   display: block;
+  overflow: visible;
 }
-.pointer { cursor: pointer; }
+
+.arc {
+  fill-rule: evenodd;
+  transition: opacity .18s, fill .25s;
+}
+.node { cursor: pointer; }
+
+.free {
+  fill: color-mix(in srgb, var(--fg) 4%, transparent);
+  stroke: var(--line2);
+  stroke-dasharray: 3 4;
+}
+
+.hole {
+  fill: var(--card);
+  stroke: var(--line);
+  cursor: pointer;
+}

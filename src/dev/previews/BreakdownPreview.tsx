@@ -68,6 +68,8 @@ const ROOT: ViewNode = {
     { count: 11, gb: 18 },
   ),
   id: 0,
+  // A disk scan's root is named after its mount point, which is what turns on the sunburst's whole-disk view.
+  name: "/",
 };
 
 const VOLUME: Volume = { name: "Macintosh HD", mount: "/", total: 1024 * GB, free: 412 * GB };
