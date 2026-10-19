@@ -64,7 +64,7 @@ function rootLabel(root: string) {
 }
 
 function summaryOf(root: string, p: ProgressMsg, cancelled: boolean): ScanSummary {
-  return { root, entries: p.files + p.dirs, bytes: p.bytes, errors: p.errors, elapsed_ms: p.elapsed_ms, cancelled };
+  return { root, entries: p.files + p.dirs, bytes: p.bytes, errors: p.errors, elapsed_ms: p.elapsed_ms, cancelled, live: true };
 }
 
 function fromQuery<T extends string>(key: string, allowed: readonly T[], fallback: T): T {

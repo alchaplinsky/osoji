@@ -7,3 +7,4 @@ version.workspace = true
 scan-core = { path = "../scan-core" }
 libc = "0.2"
 crossbeam-deque = "0.8"
+fsevent-sys = "4"

@@ -19,6 +19,7 @@ import { useTheme } from "./hooks/useTheme";
 import { useSettings } from "./hooks/useSettings";
 import { useFullDiskAccess } from "./hooks/useFullDiskAccess";
 import { useShortcuts } from "./hooks/useShortcuts";
+import { useLiveScan } from "./hooks/useLiveScan";
 import { useItemMenu } from "./hooks/useItemMenu";
 import { useAutoUpdate } from "./hooks/useAutoUpdate";
 import UpdateToast from "./components/UpdateToast";
@@ -88,7 +89,7 @@ export default function App() {
     };
   }, [scanRoot]);
 
-  const { load, reset } = explorer;
+  const { load, refresh: refreshExplorer, reset } = explorer;
   const { reset: resetScan } = scan;
   const { load: loadInsights, reset: resetInsights } = insights;
   const { refresh: refreshWatchers, reset: resetWatchers } = watchers;
@@ -113,6 +114,16 @@ export default function App() {
         .finally(() => setFinishing(false));
     }
   }, [scan.status, scan.summary, load, reset, loadInsights, resetInsights, refreshWatchers, resetWatchers, clearBin, remember, loadTrash]);
+
+  // Re-reads everything derived from the scanned tree after it changes, showing directory `id`.
+  const refreshAll = useCallback(
+    async (id: number) => {
+      // Free space is cosmetic here; a failed poll must not fail the refresh it rides along with.
+      const freeSpace = volumeInfo(scanRoot).then(setVolume).catch(console.error);
+      await Promise.all([refreshExplorer(id), loadInsights(), refreshWatchers(), loadTrash(), freeSpace]);
+    },
+    [scanRoot, refreshExplorer, loadInsights, refreshWatchers, loadTrash],
+  );
 
   const changeRoot = useCallback(
     (next: string) => {
@@ -210,7 +221,7 @@ export default function App() {
       const moved = new Set(result.trashed);
       const trashedHere = bin.items.find((i) => moved.has(i.id) && here.includes(i.id));
       result.trashed.forEach(bin.remove);
-      await Promise.all([explorer.refresh(trashedHere ? (trashedHere.ancestors.at(-1) ?? 0) : explorer.currentId), insights.load(), watchers.refresh(), loadTrash()]);
+      await refreshAll(trashedHere ? (trashedHere.ancestors.at(-1) ?? 0) : explorer.currentId);
       setHoverId(null);
       if (result.failed.length > 0) {
         setSweepError(result.failed.join("\n"));
@@ -247,6 +258,11 @@ export default function App() {
 
   const canShow = (s: Screen) => s === "scan" || s === "settings" || (s === "watchers" ? watchersOn && scanned : scanned);
   const active = canShow(screen) ? screen : "scan";
+
+  // Stays on across screens so the breakdown is current when the user comes back to it. Paused
+  // during a sweep so changes it causes are not chased mid-flight; one that landed meanwhile (the
+  // Trash growing after the last delete) is refreshed once the sweep ends.
+  useLiveScan(() => refreshAll(explorer.currentId), { enabled: scan.status === "done", paused: sweeping });
 
   useShortcuts(
     {

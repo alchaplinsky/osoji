@@ -1,10 +1,11 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { FileEntry, Guard, Suggestion } from "./types";
 
 /** Bytes found so far under one of the scan root's direct children. */
 export type TopProgress = { name: string; bytes: number };
 export type ProgressMsg = { files: number; dirs: number; bytes: number; errors: number; elapsed_ms: number; tops: TopProgress[]; rest: number };
-export type ScanSummary = { root: string; entries: number; bytes: number; errors: number; elapsed_ms: number; cancelled: boolean };
+export type ScanSummary = { root: string; entries: number; bytes: number; errors: number; elapsed_ms: number; cancelled: boolean; live: boolean };
 export type ViewNode = {
   id: number; name: string; size: number; items: number; dir: boolean; error: boolean;
   children: ViewNode[]; other: number; other_count: number; guard?: Guard | null;
@@ -21,6 +22,8 @@ export type VolumeInfo = { name: string; mount: string; total: number; free: num
 export type WatchHit = { path: string; id: number | null; size: number; dir: boolean };
 /** The user's Trash folder; `items` counts its top-level entries, as Finder does. */
 export type TrashInfo = { id: number; path: string; size: number; items: number };
+/** Emitted after the backend folds a batch of on-disk changes into the scanned tree; `dirs` are the reconciled directory ids. */
+export type ScanChanged = { dirs: number[] };
 
 export function startScan(root: string, onProgress: (p: ProgressMsg) => void): Promise<ScanSummary> {
   const channel = new Channel<ProgressMsg>();
@@ -50,3 +53,6 @@ export const volumeInfo = (path: string) => invoke<VolumeInfo>("volume_info", { 
 export const fullDiskAccess = () => invoke<boolean>("full_disk_access");
 export const openPrivacySettings = () => invoke<void>("open_privacy_settings");
 export const volumes = () => invoke<VolumeInfo[]>("volumes");
+
+export const onScanChanged = (handler: (e: ScanChanged) => void): Promise<UnlistenFn> =>
+  listen<ScanChanged>("scan:changed", (e) => handler(e.payload));

@@ -50,7 +50,11 @@ fn human(bytes: u64) -> String {
         v /= 1024.0;
         i += 1;
     }
-    if i == 0 { format!("{bytes} B") } else { format!("{v:.2} {}", U[i]) }
+    if i == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{v:.2} {}", U[i])
+    }
 }
 
 fn print_top(arena: &Arena, top: usize) {
@@ -79,7 +83,8 @@ fn print_top(arena: &Arena, top: usize) {
 
 fn main() {
     let args = Args::parse();
-    let threads = args.threads.unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8));
+    let threads =
+        args.threads.unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8));
     let cfg = ScanConfig { root: args.root.clone(), threads, cross_mounts: args.cross_mounts, qos: !args.no_qos };
 
     scan_macos::disable_dataless_materialization();
@@ -89,8 +94,8 @@ fn main() {
     let cancel = AtomicBool::new(false);
     let t0 = Instant::now();
     let result = match args.walker {
-        Walker::Bulk => scan_macos::walk(&cfg, &progress, &cancel),
-        Walker::Jwalk => scan_core::jwalk_walker::walk(&cfg, &progress, &cancel),
+        Walker::Bulk => scan_macos::walk(&cfg, &progress, &cancel, &scan_core::HardlinkSet::default()),
+        Walker::Jwalk => scan_core::jwalk_walker::walk(&cfg, &progress, &cancel, &scan_core::HardlinkSet::default()),
     };
     let elapsed = t0.elapsed();
     let arena = match result {
@@ -122,11 +127,12 @@ fn main() {
     }
 
     println!("walker={walker} threads={threads} root={}", args.root.display());
-    println!(
-        "entries={} files={files} dirs={dirs} errors={errors} hardlink_dups={dups} mounts={mounts}",
-        arena.len()
-    );
+    println!("entries={} files={files} dirs={dirs} errors={errors} hardlink_dups={dups} mounts={mounts}", arena.len());
     println!("total={} ({bytes} B)  root_size={}", human(bytes), human(arena.size[0]));
-    println!("elapsed={:.3}s  max_rss={rss:.0} MB  rate={:.0} entries/s", elapsed.as_secs_f64(), arena.len() as f64 / elapsed.as_secs_f64());
+    println!(
+        "elapsed={:.3}s  max_rss={rss:.0} MB  rate={:.0} entries/s",
+        elapsed.as_secs_f64(),
+        arena.len() as f64 / elapsed.as_secs_f64()
+    );
     print_top(&arena, args.top);
 }

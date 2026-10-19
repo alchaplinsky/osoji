@@ -1,11 +1,11 @@
 //! Reference walker B: jwalk with per-entry lstat, the same approach dua-cli uses.
 
 use crate::{Arena, Cancel, Flags, HardlinkSet, Progress, ScanConfig, NONE};
-use std::sync::atomic::Ordering;
 use jwalk::{Parallelism, WalkDirGeneric};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
+use std::sync::atomic::Ordering;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Meta {
@@ -18,7 +18,7 @@ pub struct Meta {
     mount: bool,
 }
 
-pub fn walk(cfg: &ScanConfig, progress: &Progress, cancel: &Cancel) -> io::Result<Arena> {
+pub fn walk(cfg: &ScanConfig, progress: &Progress, cancel: &Cancel, links: &HardlinkSet) -> io::Result<Arena> {
     let root_md = std::fs::symlink_metadata(&cfg.root)?;
     let root_dev = root_md.dev();
     let cross = cfg.cross_mounts;
@@ -51,7 +51,6 @@ pub fn walk(cfg: &ScanConfig, progress: &Progress, cancel: &Cancel) -> io::Resul
             }
         });
 
-    let links = HardlinkSet::default();
     let mut arena = Arena::with_capacity(1 << 20, 16 << 20);
     let mut stack: Vec<u32> = Vec::new();
     let (mut files, mut dirs, mut bytes, mut errors) = (0u64, 0u64, 0u64, 0u64);
@@ -75,6 +74,7 @@ pub fn walk(cfg: &ScanConfig, progress: &Progress, cancel: &Cancel) -> io::Resul
         let meta = entry.client_state;
         let ft = entry.file_type();
         let mut size = meta.blocks * 512;
+        let mut linked = false;
 
         if ft.is_dir() {
             flags |= Flags::DIR;
@@ -90,9 +90,12 @@ pub fn walk(cfg: &ScanConfig, progress: &Progress, cancel: &Cancel) -> io::Resul
             files += 1;
             if ft.is_symlink() {
                 flags |= Flags::SYMLINK;
-            } else if ft.is_file() && meta.nlink > 1 && links.is_dup(meta.dev, meta.ino) {
-                flags |= Flags::HARDLINK_DUP;
-                size = 0;
+            } else if ft.is_file() && meta.nlink > 1 {
+                linked = true;
+                if links.is_dup(meta.dev, meta.ino) {
+                    flags |= Flags::HARDLINK_DUP;
+                    size = 0;
+                }
             }
         }
         if depth > 0 && !meta.ok {
@@ -105,12 +108,13 @@ pub fn walk(cfg: &ScanConfig, progress: &Progress, cancel: &Cancel) -> io::Resul
         }
         bytes += size;
 
-        let name: &[u8] = if depth == 0 {
-            cfg.root.as_os_str().as_bytes()
-        } else {
-            entry.file_name().as_bytes()
-        };
+        let name: &[u8] = if depth == 0 { cfg.root.as_os_str().as_bytes() } else { entry.file_name().as_bytes() };
         let id = arena.push(parent, name, size, meta.mtime, flags);
+        arena.dev[id as usize] = meta.dev as u32;
+        arena.ino[id as usize] = meta.ino;
+        if linked {
+            links.record(meta.dev, meta.ino, id, !flags.contains(Flags::HARDLINK_DUP));
+        }
         if ft.is_dir() {
             stack.push(id);
         }

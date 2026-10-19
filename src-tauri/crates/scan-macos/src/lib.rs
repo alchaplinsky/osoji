@@ -4,11 +4,18 @@
 //! thread-local entry list, then appends the whole directory as one contiguous
 //! block to the shared arena under a single lock acquisition.
 
+mod watch;
+
+pub use watch::{Batch, Watcher};
+
 use crossbeam_deque::{Injector, Stealer, Worker};
-use scan_core::{Arena, Cancel, Flags, HardlinkSet, Progress, ScanConfig, NodeId, NONE};
-use std::ffi::CString;
+use scan_core::live::DirEntry;
+use scan_core::{Arena, Cancel, Flags, HardlinkSet, NodeId, Progress, ScanConfig, NONE};
+use std::ffi::{CStr, CString};
 use std::io;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -111,11 +118,15 @@ struct Entry {
     mtime: i64,
     flags: Flags,
     top: u32,
+    dev: u32,
+    ino: u64,
+    /// (dev, ino) of a regular file with nlink > 1, recorded once its id is known.
+    link: Option<(u64, u64)>,
 }
 
 struct Shared<'a> {
     arena: Mutex<Arena>,
-    links: HardlinkSet,
+    links: &'a HardlinkSet,
     progress: &'a Progress,
     injector: Injector<Task>,
     stealers: Vec<Stealer<Task>>,
@@ -142,7 +153,99 @@ fn i64_at(b: &[u8], off: usize) -> i64 {
     i64::from_ne_bytes(b[off..off + 8].try_into().unwrap())
 }
 
-pub fn walk(cfg: &ScanConfig, progress: &Progress, cancel: &Cancel) -> io::Result<Arena> {
+/// One decoded getattrlistbulk record; `name` borrows the read buffer.
+struct Record<'a> {
+    name: &'a [u8],
+    err: u32,
+    objtype: u32,
+    devid: u64,
+    mtime: i64,
+    fileid: u64,
+    mountstatus: u32,
+    nlink: u32,
+    allocsize: u64,
+}
+
+/// `None` for a record too short to carry a name.
+fn parse_record(rec: &[u8]) -> Option<Record<'_>> {
+    let len = rec.len();
+    if len < RECORD_MIN {
+        return None;
+    }
+    let name_off = i32_at(rec, OFF_NAME) as isize;
+    let name_len = u32_at(rec, OFF_NAME + 4) as usize;
+    let start = (OFF_NAME as isize + name_off) as usize;
+    let mut name = &rec[start..start + name_len];
+    while let Some((&0, rest)) = name.split_last() {
+        name = rest;
+    }
+
+    let mut r = Record {
+        name,
+        err: u32_at(rec, OFF_ERROR),
+        objtype: u32_at(rec, OFF_OBJTYPE),
+        devid: i32_at(rec, OFF_DEVID) as u64,
+        mtime: i64_at(rec, OFF_MODTIME),
+        fileid: u64_at(rec, OFF_FILEID),
+        mountstatus: 0,
+        nlink: 1,
+        allocsize: 0,
+    };
+    let mut cur = OFF_TAIL;
+    if u32_at(rec, OFF_RET_DIRATTR) & ATTR_DIR_MOUNTSTATUS != 0 && cur + 4 <= len {
+        r.mountstatus = u32_at(rec, cur);
+        cur += 4;
+    }
+    let ret_file = u32_at(rec, OFF_RET_FILEATTR);
+    if ret_file & ATTR_FILE_LINKCOUNT != 0 && cur + 4 <= len {
+        r.nlink = u32_at(rec, cur);
+        cur += 4;
+    }
+    if ret_file & ATTR_FILE_ALLOCSIZE != 0 && cur + 8 <= len {
+        r.allocsize = i64_at(rec, cur).max(0) as u64;
+    }
+    Some(r)
+}
+
+/// The `n` length-prefixed records getattrlistbulk left in `buf`.
+fn records(buf: &[u8], n: usize) -> impl Iterator<Item = &[u8]> {
+    let mut pos = 0usize;
+    (0..n).map(move |_| {
+        let len = u32_at(buf, pos) as usize;
+        let rec = &buf[pos..pos + len];
+        pos += len;
+        rec
+    })
+}
+
+/// One getattrlistbulk call, retried on EINTR. `Ok(0)` means the directory is drained.
+fn read_bulk(fd: libc::c_int, al: &mut AttrList, buf: &mut [u8]) -> io::Result<usize> {
+    loop {
+        let n = unsafe {
+            getattrlistbulk(
+                fd,
+                al,
+                buf.as_mut_ptr() as *mut libc::c_void,
+                buf.len(),
+                FSOPT_NOFOLLOW | FSOPT_PACK_INVAL_ATTRS,
+            )
+        };
+        if n >= 0 {
+            return Ok(n as usize);
+        }
+        let err = io::Error::last_os_error();
+        if err.raw_os_error() != Some(libc::EINTR) {
+            return Err(err);
+        }
+    }
+}
+
+fn open_dir(path: &CStr) -> libc::c_int {
+    unsafe { libc::open(path.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | O_NOFOLLOW_ANY | libc::O_CLOEXEC) }
+}
+
+/// `links` collects the hard-link registry for the scan; pass a fresh set per walk.
+pub fn walk(cfg: &ScanConfig, progress: &Progress, cancel: &Cancel, links: &HardlinkSet) -> io::Result<Arena> {
     let mut arena = Arena::with_capacity(1 << 20, 16 << 20);
     let root = arena.push(NONE, cfg.root.as_os_str().as_bytes(), 0, 0, Flags::DIR);
     let root_path = CString::new(cfg.root.as_os_str().as_bytes()).map_err(|_| io::Error::other("NUL in path"))?;
@@ -150,7 +253,7 @@ pub fn walk(cfg: &ScanConfig, progress: &Progress, cancel: &Cancel) -> io::Resul
     let workers: Vec<Worker<Task>> = (0..cfg.threads).map(|_| Worker::new_lifo()).collect();
     let shared = Shared {
         arena: Mutex::new(arena),
-        links: HardlinkSet::default(),
+        links,
         progress,
         injector: Injector::new(),
         stealers: workers.iter().map(|w| w.stealer()).collect(),
@@ -234,12 +337,7 @@ fn process_dir(
     entries.clear();
     names.clear();
 
-    let fd = unsafe {
-        libc::open(
-            task.path.as_ptr(),
-            libc::O_RDONLY | libc::O_DIRECTORY | O_NOFOLLOW_ANY | libc::O_CLOEXEC,
-        )
-    };
+    let fd = open_dir(&task.path);
     if fd < 0 {
         mark_error(shared, task.id);
         return;
@@ -250,69 +348,28 @@ fn process_dir(
     let mut subdirs: Vec<usize> = Vec::new();
 
     loop {
-        let n = unsafe {
-            getattrlistbulk(
-                fd,
-                &mut al,
-                buf.as_mut_ptr() as *mut libc::c_void,
-                buf.len(),
-                FSOPT_NOFOLLOW | FSOPT_PACK_INVAL_ATTRS,
-            )
-        };
-        if n < 0 {
-            let err = io::Error::last_os_error();
-            if err.raw_os_error() == Some(libc::EINTR) {
-                continue;
+        let n = match read_bulk(fd, &mut al, buf) {
+            Ok(n) => n,
+            Err(_) => {
+                errors += 1;
+                break;
             }
-            errors += 1;
-            break;
-        }
+        };
         if n == 0 || shared.cancel.load(Ordering::Relaxed) {
             break;
         }
 
-        let mut pos = 0usize;
-        for _ in 0..n {
-            let len = u32_at(buf, pos) as usize;
-            let rec = &buf[pos..pos + len];
-            pos += len;
-            if len < RECORD_MIN {
+        for rec in records(buf, n) {
+            let Some(Record { name, err: entry_err, objtype, devid, mtime, fileid, mountstatus, nlink, allocsize }) =
+                parse_record(rec)
+            else {
                 errors += 1;
                 continue;
-            }
-
-            let name_off = i32_at(rec, OFF_NAME) as isize;
-            let name_len = u32_at(rec, OFF_NAME + 4) as usize;
-            let start = (OFF_NAME as isize + name_off) as usize;
-            let mut name = &rec[start..start + name_len];
-            while let Some((&0, rest)) = name.split_last() {
-                name = rest;
-            }
-
-            let entry_err = u32_at(rec, OFF_ERROR);
-            let objtype = u32_at(rec, OFF_OBJTYPE);
-            let devid = i32_at(rec, OFF_DEVID) as u64;
-            let mtime = i64_at(rec, OFF_MODTIME);
-            let fileid = u64_at(rec, OFF_FILEID);
-            let mut cur = OFF_TAIL;
-            let mut mountstatus = 0u32;
-            let mut nlink = 1u32;
-            let mut allocsize = 0u64;
-            if u32_at(rec, OFF_RET_DIRATTR) & ATTR_DIR_MOUNTSTATUS != 0 && cur + 4 <= len {
-                mountstatus = u32_at(rec, cur);
-                cur += 4;
-            }
-            let ret_file = u32_at(rec, OFF_RET_FILEATTR);
-            if ret_file & ATTR_FILE_LINKCOUNT != 0 && cur + 4 <= len {
-                nlink = u32_at(rec, cur);
-                cur += 4;
-            }
-            if ret_file & ATTR_FILE_ALLOCSIZE != 0 && cur + 8 <= len {
-                allocsize = i64_at(rec, cur).max(0) as u64;
-            }
+            };
 
             let mut flags = Flags::empty();
             let mut size = allocsize;
+            let mut link = None;
             if entry_err != 0 {
                 flags |= Flags::ERROR;
                 errors += 1;
@@ -341,9 +398,12 @@ fn process_dir(
                 }
                 VREG => {
                     files += 1;
-                    if nlink > 1 && shared.links.is_dup(devid, fileid) {
-                        flags |= Flags::HARDLINK_DUP;
-                        size = 0;
+                    if nlink > 1 {
+                        link = Some((devid, fileid));
+                        if shared.links.is_dup(devid, fileid) {
+                            flags |= Flags::HARDLINK_DUP;
+                            size = 0;
+                        }
                     }
                 }
                 _ => files += 1,
@@ -365,6 +425,9 @@ fn process_dir(
                 mtime,
                 flags,
                 top,
+                dev: devid as u32,
+                ino: fileid,
+                link,
             });
             names.extend_from_slice(name);
         }
@@ -381,10 +444,17 @@ fn process_dir(
         for e in entries.iter() {
             let off = e.name_off as usize;
             let name = &names[off..off + e.name_len as usize];
-            arena.push(task.id, name, e.size, e.mtime, e.flags);
+            let id = arena.push(task.id, name, e.size, e.mtime, e.flags) as usize;
+            arena.dev[id] = e.dev;
+            arena.ino[id] = e.ino;
         }
         first
     };
+    for (i, e) in entries.iter().enumerate() {
+        if let Some((dev, ino)) = e.link {
+            shared.links.record(dev, ino, first_id + i as NodeId, !e.flags.contains(Flags::HARDLINK_DUP));
+        }
+    }
     shared.progress.add(files, dirs, bytes, errors);
 
     if !subdirs.is_empty() {
@@ -402,6 +472,58 @@ fn process_dir(
             local.push(Task { id: first_id + idx as NodeId, path, top: Top::Child(e.top) });
         }
     }
+}
+
+/// Lists one directory the way the walker records it: allocated sizes, directories at 0,
+/// symlinks not followed, mount points flagged `MOUNT`. Hard links are not deduplicated; a
+/// live listing has no scan-wide view of which link was seen first, so each counts as an
+/// ordinary file. Like the walker, fails if any component of `path` is a symlink, so pass
+/// canonical paths.
+pub fn list_dir(path: &Path) -> io::Result<Vec<DirEntry>> {
+    let cpath = CString::new(path.as_os_str().as_bytes()).map_err(|_| io::Error::other("NUL in path"))?;
+    let fd = open_dir(&cpath);
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+
+    let mut al = attrlist();
+    let mut buf = vec![0u8; BUF_SIZE];
+    let mut out = Vec::new();
+    // A failed read mid-directory is an error for the whole listing: reconciling against a
+    // partial one would drop the entries it missed.
+    while let n @ 1.. = read_bulk(fd.as_raw_fd(), &mut al, &mut buf)? {
+        // A truncated record has no name to report, so it is skipped as the walker skips it.
+        for r in records(&buf, n).filter_map(parse_record) {
+            let mut flags = Flags::empty();
+            let mut size = r.allocsize;
+            match r.objtype {
+                VDIR => {
+                    flags |= Flags::DIR;
+                    size = 0;
+                    if r.mountstatus & DIR_MNTSTATUS_MNTPOINT != 0 {
+                        flags |= Flags::MOUNT;
+                    }
+                }
+                VLNK => flags |= Flags::SYMLINK,
+                _ => {}
+            }
+            if r.err != 0 {
+                flags |= Flags::ERROR;
+                size = 0;
+            }
+            out.push(DirEntry {
+                name: r.name.to_vec(),
+                size,
+                mtime: r.mtime,
+                flags,
+                dev: r.devid,
+                ino: r.fileid,
+                nlink: r.nlink,
+            });
+        }
+    }
+    Ok(out)
 }
 
 fn set_user_initiated_qos() {
@@ -449,18 +571,26 @@ pub fn raise_fd_limit() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::fs;
-    use std::path::Path;
+    use std::path::PathBuf;
 
-    fn write(path: &Path, bytes: usize) {
+    pub(crate) fn write(path: &Path, bytes: usize) {
         fs::write(path, vec![0xA5u8; bytes]).unwrap();
+    }
+
+    /// A fresh, empty directory under the temp dir. The walker opens with O_NOFOLLOW_ANY and
+    /// FSEvents reports real paths, and /var is a symlink, so the temp dir is resolved first.
+    pub(crate) fn temp_root(tag: &str) -> PathBuf {
+        let root = fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("osoji-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        root
     }
 
     #[test]
     fn attributes_bytes_to_the_roots_direct_children() {
-        // The walker opens with O_NOFOLLOW_ANY, and /var is a symlink, so resolve the temp dir first.
-        let root = fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("osoji-tops-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
+        let root = temp_root("tops");
         fs::create_dir_all(root.join("a")).unwrap();
         fs::create_dir_all(root.join("b/deep")).unwrap();
         write(&root.join("a/x"), 8192);
@@ -470,7 +600,7 @@ mod tests {
 
         let cfg = ScanConfig { root: root.clone(), threads: 2, cross_mounts: false, qos: false };
         let progress = Progress::default();
-        let arena = walk(&cfg, &progress, &Cancel::new(false)).unwrap();
+        let arena = walk(&cfg, &progress, &Cancel::new(false), &HardlinkSet::default()).unwrap();
 
         let mut tops = progress.tops();
         tops.sort();
@@ -481,6 +611,62 @@ mod tests {
         assert_eq!(tops[2].1, tops[0].1); // the root-level file counts as its own child
         assert_eq!(total, arena.size[0]);
         assert_eq!(progress.rest(), 0);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn list_dir_matches_the_walker() {
+        let root = temp_root("list");
+        fs::create_dir_all(root.join("sub")).unwrap();
+        write(&root.join("sub/inner"), 4096);
+        write(&root.join("small"), 10);
+        write(&root.join("big"), 100_000);
+        fs::hard_link(root.join("big"), root.join("big-link")).unwrap();
+        std::os::unix::fs::symlink("sub", root.join("sym")).unwrap();
+
+        let cfg = ScanConfig { root: root.clone(), threads: 2, cross_mounts: false, qos: false };
+        let arena = walk(&cfg, &Progress::default(), &Cancel::new(false), &HardlinkSet::default()).unwrap();
+        let walked: BTreeMap<Vec<u8>, (u64, i64, Flags)> = arena
+            .children(0)
+            .map(|id| {
+                let i = id as usize;
+                // Directory sizes in the arena are aggregated; the walker records them as 0 itself.
+                let size = if arena.flags[i].contains(Flags::DIR) { 0 } else { arena.size[i] };
+                (arena.name(id).to_vec(), (size, arena.mtime[i], arena.flags[i]))
+            })
+            .collect();
+        let listed: BTreeMap<Vec<u8>, (u64, i64, Flags)> =
+            list_dir(&root).unwrap().into_iter().map(|e| (e.name, (e.size, e.mtime, e.flags))).collect();
+
+        assert_eq!(listed.keys().collect::<Vec<_>>(), walked.keys().collect::<Vec<_>>());
+        for (name, w) in &walked {
+            let l = listed[name];
+            if w.2.contains(Flags::HARDLINK_DUP) {
+                // The walker zeroes the second link it meets; a listing counts both in full.
+                assert_eq!(l.0, listed[&b"big"[..]].0);
+                assert_eq!(l.2, w.2 - Flags::HARDLINK_DUP);
+            } else {
+                assert_eq!(&l, w, "{}", String::from_utf8_lossy(name));
+            }
+        }
+        let walked_ids: BTreeMap<Vec<u8>, (u32, u64)> = arena
+            .children(0)
+            .map(|id| (arena.name(id).to_vec(), (arena.dev[id as usize], arena.ino[id as usize])))
+            .collect();
+        // The arena keeps dev as u32, the listing as u64.
+        let listed_ids: BTreeMap<Vec<u8>, (u32, u64)> =
+            list_dir(&root).unwrap().into_iter().map(|e| (e.name, (e.dev as u32, e.ino))).collect();
+        assert_eq!(listed_ids, walked_ids);
+        assert!(walked_ids.values().all(|&(_, ino)| ino != 0));
+        assert_eq!(walked_ids[&b"big"[..]], walked_ids[&b"big-link"[..]]);
+
+        assert!(listed[&b"big"[..]].0 >= 100_000);
+        assert!(listed[&b"sub"[..]].2.contains(Flags::DIR));
+        assert!(listed[&b"sym"[..]].2.contains(Flags::SYMLINK));
+
+        assert!(list_dir(&root.join("sym")).is_err(), "must not follow a symlinked directory path");
+        assert!(list_dir(&root.join("missing")).is_err());
 
         fs::remove_dir_all(&root).unwrap();
     }

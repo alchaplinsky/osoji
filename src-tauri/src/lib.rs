@@ -1,11 +1,13 @@
 //! Tauri backend: owns the scan state and exposes bounded views to the UI.
 //! The arena never crosses IPC; commands return only what is on screen.
 
+mod live;
 #[cfg(target_os = "macos")]
 mod zoom;
 
-use scan_core::{Arena, Cancel, ChildIndex, Flags, NodeId, Progress, ScanConfig, NONE};
-use scan_policy::{covering, Kind, Policy, PolicyContext, PolicyHits, Safety};
+use scan_core::live::{detach, is_gone, Detached, Hardlinks};
+use scan_core::{Arena, Cancel, ChildIndex, Flags, HardlinkSet, NodeId, Progress, ScanConfig, NONE};
+use scan_policy::{covering, Kind, Policy, PolicyContext, PolicyHits, Safety, POLICY_FLAGS};
 use serde::Serialize;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashSet};
@@ -15,15 +17,27 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{Manager, State};
 
 struct Scan {
     root: PathBuf,
     arena: Arena,
     index: ChildIndex,
     hits: PolicyHits,
-    /// Bytes and items Osoji moved to the Trash since the scan, which the arena no longer counts.
-    swept: (u64, u32),
+    /// Which nodes share an inode and which of them carries the bytes, kept current by live updates.
+    links: Hardlinks,
+    /// Bumped by every change to the arena, so a live update can tell its listings went stale (live.rs).
+    epoch: u64,
+}
+
+impl Scan {
+    /// Match `ids` against the policy again after a live change or a sweep: size and age rules
+    /// test a node's own size or a directory's total, and those moved.
+    fn restamp(&mut self, policy: &Policy, ctx: &PolicyContext, mut ids: Vec<NodeId>) {
+        ids.sort_unstable();
+        ids.dedup();
+        policy.resolve(&self.arena, &self.index, ctx).stamp_ids(&mut self.arena, ids, &mut self.hits);
+    }
 }
 
 #[derive(Default)]
@@ -32,9 +46,15 @@ struct AppState {
     cancel: Mutex<Option<Arc<Cancel>>>,
     running: AtomicBool,
     policy: Policy,
-    /// Bumped each time `scan` is replaced, so a sweep can tell its arena went stale.
+    /// Bumped each time `scan` is replaced, so a sweep or a live update can tell its arena went stale.
     generation: AtomicU64,
     sweeping: AtomicBool,
+    /// Keeps `scan` current with the disk; replaced along with it.
+    watcher: Mutex<Option<scan_macos::Watcher>>,
+    /// Watcher batches held back while a scan runs, applied once its result is in place.
+    pending: Mutex<Option<Vec<scan_macos::Batch>>>,
+    /// Held for the whole of each live apply, so two never interleave their phases.
+    applying: Mutex<()>,
 }
 
 /// Why the UI should treat a node with care: "trash", "protected", "risky" or "unexpected".
@@ -43,8 +63,6 @@ struct Guard {
     kind: &'static str,
     reason: String,
 }
-
-const POLICY_FLAGS: Flags = Flags::TRASH_FOLDER.union(Flags::PROTECTED).union(Flags::RISKY).union(Flags::UNEXPECTED);
 
 fn guard_of(policy: &Policy, scan: &Scan, id: NodeId) -> Option<Guard> {
     if !scan.arena.flags[id as usize].intersects(POLICY_FLAGS) {
@@ -81,6 +99,8 @@ struct ScanSummary {
     errors: u64,
     elapsed_ms: u64,
     cancelled: bool,
+    /// Whether a watcher follows the scan now in place, so the UI can tell a stale view from a live one.
+    live: bool,
 }
 
 #[derive(Serialize)]
@@ -206,15 +226,18 @@ fn is_package(arena: &Arena, id: NodeId) -> bool {
 }
 
 /// Resolve an absolute path to a node of the scan, or NONE when it is outside the scan or missing.
+/// Detached nodes are skipped: a name that came back on disk is a different, live node.
 fn find_node(scan: &Scan, path: &Path) -> NodeId {
     use std::os::unix::ffi::OsStrExt;
     let Ok(rest) = path.strip_prefix(&scan.root) else {
         return NONE;
     };
+    let a = &scan.arena;
     let mut id: NodeId = 0;
     for part in rest.components() {
         let name = part.as_os_str().as_bytes();
-        match scan.index.children(id).iter().find(|&&c| scan.arena.name(c) == name) {
+        let live = |&&c: &&NodeId| a.name(c) == name && !a.flags[c as usize].intersects(DETACHED);
+        match scan.index.children(id).iter().find(live) {
             Some(&c) => id = c,
             None => return NONE,
         }
@@ -232,6 +255,7 @@ fn resolve_root(root: &str) -> Result<PathBuf, String> {
 
 #[tauri::command]
 async fn start_scan(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     root: String,
     threads: Option<usize>,
@@ -243,15 +267,37 @@ async fn start_scan(
     if state.running.swap(true, Ordering::AcqRel) {
         return Err("a scan is already running".into());
     }
-    let canonical = match resolve_root(&root) {
-        Ok(p) => p,
-        Err(e) => {
-            state.running.store(false, Ordering::Release);
-            return Err(e);
-        }
-    };
+    // Cleared only once the queued batches are applied, so a next scan cannot start queueing over them.
+    let result = scan(&app, &state, root, threads, on_progress).await;
+    state.running.store(false, Ordering::Release);
+    result
+}
+
+async fn scan(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    root: String,
+    threads: Option<usize>,
+    on_progress: Channel<ProgressMsg>,
+) -> Result<ScanSummary, String> {
+    let canonical = resolve_root(&root)?;
+    // Before the watcher starts, so a stop during its half-second start already reaches the walk.
     let cancel = Arc::new(AtomicBool::new(false));
     *state.cancel.lock().unwrap() = Some(cancel.clone());
+    // The new watcher is live before the walk starts, so a change the walk misses is still reported;
+    // its batches, and the old watcher's, wait until the walk's result is in place.
+    *state.pending.lock().unwrap() = Some(Vec::new());
+    let watcher = {
+        let (app, root) = (app.clone(), canonical.clone());
+        tauri::async_runtime::spawn_blocking(move || live::watch(app, &root)).await
+    };
+    let watcher = match watcher.map_err(|e| e.to_string()).and_then(|w| w.map_err(|e| e.to_string())) {
+        Ok(w) => Some(w),
+        Err(e) => {
+            eprintln!("watch {}: {e}; the scan will not follow changes", canonical.display());
+            None
+        }
+    };
 
     let cfg = ScanConfig {
         root: canonical,
@@ -283,35 +329,61 @@ async fn start_scan(
 
     let task = {
         let (cfg, progress, cancel) = (cfg.clone(), progress.clone(), cancel.clone());
-        tauri::async_runtime::spawn_blocking(move || scan_macos::walk(&cfg, &progress, &cancel)).await
+        tauri::async_runtime::spawn_blocking(move || {
+            let links = HardlinkSet::default();
+            scan_macos::walk(&cfg, &progress, &cancel, &links).map(|arena| (arena, links.finish()))
+        })
+        .await
     };
     done.store(true, Ordering::Release);
     let _ = poller.join();
-    state.running.store(false, Ordering::Release);
     state.cancel.lock().unwrap().take();
 
-    let result = task.map_err(|e| e.to_string())?;
-    let mut arena = result.map_err(|e| e.to_string())?;
     let cancelled = cancel.load(Ordering::Relaxed);
-    let summary = ScanSummary {
+    let summary = |arena: &Arena, live: bool| ScanSummary {
         root: root.clone(),
         entries: arena.len(),
         bytes: arena.size[0],
         errors: progress.errors.load(Ordering::Relaxed),
         elapsed_ms: t0.elapsed().as_millis() as u64,
         cancelled,
+        live,
     };
+    let walked = task.map_err(|e| e.to_string()).and_then(|r| r.map_err(|e| e.to_string()));
     // A stopped walk leaves every unfinished directory under-counted, so it never replaces the
-    // last complete scan.
-    if !cancelled {
-        let index = ChildIndex::build(&arena);
-        let ctx = PolicyContext { home: home_path(), now: unix_now() };
-        let hits = state.policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
+    // last complete scan; that one stays current, and what was queued meanwhile is its.
+    let (mut arena, links) = match walked {
+        Ok(walked) if !cancelled => walked,
+        other => {
+            settle(app, watcher).await;
+            let live = state.watcher.lock().unwrap().is_some();
+            return other.map(|(arena, _)| summary(&arena, live));
+        }
+    };
+    let summary = summary(&arena, watcher.is_some());
+    let index = ChildIndex::build(&arena);
+    let ctx = PolicyContext { home: home_path(), now: unix_now() };
+    let hits = state.policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
+    {
         let mut slot = state.scan.lock().unwrap();
-        *slot = Some(Scan { root: cfg.root, arena, index, hits, swept: (0, 0) });
+        *slot = Some(Scan { root: cfg.root.clone(), arena, index, hits, links, epoch: 0 });
         state.generation.fetch_add(1, Ordering::AcqRel);
     }
+    let old = std::mem::replace(&mut *state.watcher.lock().unwrap(), watcher);
+    settle(app, old).await;
     Ok(summary)
+}
+
+/// Drop `watcher`, then apply the batches queued while a scan ran. Off the async thread: dropping
+/// joins the watcher's thread, which may be mid-batch, and applying lists and walks directories.
+/// After the drop, so nothing that watcher still delivers is left in the queue.
+async fn settle(app: &tauri::AppHandle, watcher: Option<scan_macos::Watcher>) {
+    let app = app.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        drop(watcher);
+        live::drain(&app.state::<AppState>(), live::notify(&app));
+    })
+    .await;
 }
 
 /// Canonical, because `Scan.root` is canonical and a home reached through a symlink must still match.
@@ -352,7 +424,7 @@ fn build_view(policy: &Policy, scan: &Scan, id: NodeId, depth: u8, top_k: usize,
     }
     for &c in scan.index.children(id) {
         let ci = c as usize;
-        if a.flags[ci].contains(Flags::TRASHED) {
+        if a.flags[ci].intersects(DETACHED) {
             continue;
         }
         if node.children.len() < top_k && a.size[ci] >= min_size {
@@ -400,7 +472,8 @@ fn node_info(state: State<'_, AppState>, node: NodeId) -> Result<NodeInfo, Strin
         items: a.items[node as usize],
         dir: f.contains(Flags::DIR),
         error: f.contains(Flags::ERROR),
-        trashed: f.contains(Flags::TRASHED),
+        // The UI treats both the same: the node is no longer on disk where the scan saw it.
+        trashed: f.intersects(DETACHED),
         mtime: a.mtime[node as usize],
         ancestors,
         guard: guard_of(&state.policy, scan, node),
@@ -519,10 +592,13 @@ struct WatchHit {
     dir: bool,
 }
 
-/// Moved to the Trash by Osoji, or sitting in the Trash folder: either way not the user's to sort.
-const GONE: Flags = Flags::TRASHED.union(Flags::TRASH_FOLDER);
+/// No longer counted in the tree: moved to the Trash by Osoji, or vanished from disk on its own.
+const DETACHED: Flags = Flags::TRASHED.union(Flags::REMOVED);
 
-/// True when `id` or one of its ancestors was moved to the Trash or is the Trash folder.
+/// Detached, or sitting in the Trash folder: either way not the user's to sort.
+const GONE: Flags = DETACHED.union(Flags::TRASH_FOLDER);
+
+/// True when `id` or one of its ancestors is detached or is the Trash folder.
 fn gone_or_in_trash(a: &Arena, mut id: NodeId) -> bool {
     while id != NONE {
         if a.flags[id as usize].intersects(GONE) {
@@ -587,7 +663,10 @@ fn protection(policy: &Policy, scan: &Scan, id: NodeId) -> Option<String> {
         .hits
         .iter()
         .map(|(node, _)| node)
-        .filter(|&node| a.flags[node as usize].contains(Flags::PROTECTED) && has_ancestor(a, node, id))
+        // A protected node that left the tree, or sits under one that did, is no longer inside `id`.
+        .filter(|&node| {
+            a.flags[node as usize].contains(Flags::PROTECTED) && has_ancestor(a, node, id) && !is_gone(a, node)
+        })
         .min()?;
     Some(format!("{}: protected. It contains {}. {}", a.path(id).display(), a.path(inner).display(), reason(inner)))
 }
@@ -620,15 +699,19 @@ fn plan_sweep(policy: &Policy, scan: &Scan, nodes: Vec<NodeId>) -> Result<(Vec<S
     Ok((items, refused))
 }
 
-/// Fold the delete outcomes into the tree. `live` is None when another scan replaced the arena
-/// meanwhile: the items are still reported as moved, but nothing is marked.
+/// Fold the delete outcomes into the tree and match the ancestors, whose totals moved, against
+/// `policy` again. `live` is None when another scan replaced the arena meanwhile: the items are
+/// still reported as moved, but nothing is marked. Bytes are the planned size when nothing can be
+/// marked or a live update already detached the node; otherwise what emptying the Trash frees.
 fn finish_sweep(
+    policy: &Policy,
     mut live: Option<&mut Scan>,
     outcomes: Vec<(NodeId, u64, Result<(), String>)>,
     mut failed: Vec<String>,
 ) -> TrashResult {
     let mut bytes = 0u64;
     let mut trashed = Vec::new();
+    let mut touched = Vec::new();
     for (id, size, outcome) in outcomes {
         if let Err(e) = outcome {
             failed.push(e);
@@ -639,14 +722,23 @@ fn finish_sweep(
             bytes += size;
             continue;
         };
-        let moved = scan.arena.mark_trashed(id);
+        // A live update that saw the delete first took it off the tree, but it still went to the
+        // Trash. Otherwise count what emptying the Trash frees: nothing while another hard link lives.
+        let moved = if is_gone(&scan.arena, id) {
+            size
+        } else {
+            detach(&mut scan.arena, &scan.index, &mut scan.links, id, Detached::Trashed)
+        };
+        scan.epoch += 1;
         bytes += moved;
-        scan.swept = (scan.swept.0 + moved, scan.swept.1 + 1);
-        let mut p = scan.arena.parent[id as usize];
-        while p != NONE {
+        let up = ancestors_of(&scan.arena, id);
+        for &p in &up {
             scan.index.resort(&scan.arena, p);
-            p = scan.arena.parent[p as usize];
         }
+        touched.extend(up);
+    }
+    if let Some(scan) = live.filter(|_| !touched.is_empty()) {
+        scan.restamp(policy, &PolicyContext { home: home_path(), now: unix_now() }, touched);
     }
     TrashResult { bytes, count: trashed.len(), trashed, failed }
 }
@@ -702,7 +794,7 @@ async fn sweep(
     let mut guard = state.scan.lock().unwrap();
     // A scan that finished meanwhile replaced the arena: the ids no longer point at what was deleted.
     let live = guard.as_mut().filter(|_| state.generation.load(Ordering::Acquire) == generation);
-    Ok(finish_sweep(live, outcomes, refused))
+    Ok(finish_sweep(&state.policy, live, outcomes, refused))
 }
 
 #[derive(Serialize)]
@@ -714,15 +806,23 @@ struct TrashInfo {
     items: u32,
 }
 
-/// The user's Trash folder as scanned, plus what Osoji moved there since. None when the scan does not cover it.
+/// The user's Trash folder as the scan currently has it: what a sweep moves there arrives as a live
+/// update like any other change. None when the scan does not cover it. A Trash deleted and
+/// recreated keeps its old, detached node and hit, which must not win.
 fn trash_of(policy: &Policy, scan: &Scan) -> Option<TrashInfo> {
-    let id = scan.hits.iter().filter(|&(_, rule)| policy.rule(rule).kind == Kind::Trash).map(|(id, _)| id).min()?;
     let a = &scan.arena;
+    let id = scan
+        .hits
+        .iter()
+        .filter(|&(id, rule)| policy.rule(rule).kind == Kind::Trash && !a.flags[id as usize].intersects(DETACHED))
+        .map(|(id, _)| id)
+        .min()?;
+    let live = scan.index.children(id).iter().filter(|&&c| !a.flags[c as usize].intersects(DETACHED));
     Some(TrashInfo {
         id,
         path: a.path(id).to_string_lossy().into_owned(),
-        size: a.size[id as usize] + scan.swept.0,
-        items: scan.index.children(id).len() as u32 + scan.swept.1,
+        size: a.size[id as usize],
+        items: live.count() as u32,
     })
 }
 
@@ -851,7 +951,6 @@ pub fn run() {
             // animator so the page follows the frame instead of freezing (zoom.rs).
             #[cfg(target_os = "macos")]
             {
-                use tauri::Manager;
                 match app.get_webview_window("main").map(|w| w.ns_window()) {
                     Some(Ok(ns_window)) => zoom::install(ns_window),
                     Some(Err(e)) => eprintln!("zoom: no NSWindow for main ({e}); zoom stays native"),
@@ -885,6 +984,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scan_core::live::{reconcile, DirEntry};
 
     fn scan_fixture() -> (Scan, NodeId, NodeId) {
         let mut arena = Arena::default();
@@ -894,7 +994,15 @@ mod tests {
         arena.aggregate();
         let index = ChildIndex::build(&arena);
         (
-            Scan { root: PathBuf::from("/tmp/root"), arena, index, hits: PolicyHits::default(), swept: (0, 0) },
+            Scan {
+                root: PathBuf::from("/tmp/root"),
+                arena,
+                index,
+                hits: PolicyHits::default(),
+                links: Hardlinks::default(),
+
+                epoch: 0,
+            },
             folder,
             file,
         )
@@ -919,6 +1027,20 @@ mod tests {
         assert!(gone_or_in_trash(&scan.arena, file));
         assert_eq!(scan.arena.size[0], 0);
         assert_eq!(scan.arena.items[0], 0);
+    }
+
+    #[test]
+    fn hides_nodes_removed_from_disk_like_trashed_ones() {
+        let (mut scan, folder, file) = scan_fixture();
+        scan.arena.mark_removed(file);
+        let policy = Policy::default();
+
+        assert!(gone_or_in_trash(&scan.arena, file));
+        let view = build_view(&policy, &scan, folder, 1, 10, 1);
+        assert!(view.children.is_empty() && view.other_count == 0);
+        assert!(largest(&policy, &scan, 10).is_empty());
+        assert!(plan_sweep(&policy, &scan, vec![file]).unwrap().0.is_empty());
+        assert_eq!(find_node(&scan, Path::new("/tmp/root/folder/file.bin")), NONE);
     }
 
     const TRASH_POLICY: &str = r#"
@@ -946,7 +1068,7 @@ mod tests {
         let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
         (
             policy,
-            Scan { root: PathBuf::from("/tmp/root"), arena, index, hits, swept: (0, 0) },
+            Scan { root: PathBuf::from("/tmp/root"), arena, index, hits, links: Hardlinks::default(), epoch: 0 },
             [trash, docs, old, report],
         )
     }
@@ -979,18 +1101,72 @@ mod tests {
         assert_eq!(names, ["report.pdf", "notes.txt"]);
     }
 
+    fn listed(name: &str, size: u64) -> DirEntry {
+        DirEntry { name: name.as_bytes().to_vec(), size, mtime: 0, flags: Flags::empty(), dev: 0, ino: 0, nlink: 1 }
+    }
+
     #[test]
-    fn reports_the_trash_with_what_was_swept_since_the_scan() {
+    fn reports_the_trash_as_the_live_updates_leave_it() {
         let (policy, mut scan, [trash, _, _, report]) = trash_fixture();
         let info = trash_of(&policy, &scan).unwrap();
         assert_eq!((info.id, info.path.as_str(), info.size, info.items), (trash, "/tmp/root/.Trash", 100, 1));
 
-        finish_sweep(Some(&mut scan), vec![(report, 20, Ok(()))], Vec::new());
+        // The sweep only takes the file out of `docs`; the Trash grows when its own listing arrives.
+        finish_sweep(&policy, Some(&mut scan), vec![(report, 20, Ok(()))], Vec::new());
+        let info = trash_of(&policy, &scan).unwrap();
+        assert_eq!((info.size, info.items), (100, 1));
+
+        reconcile(
+            &mut scan.arena,
+            &scan.index,
+            &mut scan.links,
+            trash,
+            &[listed("old.iso", 100), listed("report.pdf", 20)],
+        );
+        scan.index = ChildIndex::build(&scan.arena);
         let info = trash_of(&policy, &scan).unwrap();
         assert_eq!((info.size, info.items), (120, 2));
 
+        // Emptied from Finder: the removed children stay in the index but no longer count.
+        reconcile(&mut scan.arena, &scan.index, &mut scan.links, trash, &[listed("report.pdf", 20)]);
+        let info = trash_of(&policy, &scan).unwrap();
+        assert_eq!((info.size, info.items), (20, 1));
+
         let (plain, _, _) = scan_fixture();
         assert!(trash_of(&policy, &plain).is_none());
+    }
+
+    #[test]
+    fn a_sweep_reports_the_planned_size_when_a_live_update_got_there_first() {
+        let (mut scan, _, file) = scan_fixture();
+        scan.arena.mark_removed(file);
+
+        let result = finish_sweep(&Policy::default(), Some(&mut scan), vec![(file, 10, Ok(()))], Vec::new());
+        assert_eq!((result.bytes, result.count), (10, 1));
+        assert_eq!(scan.arena.size[0], 0, "not taken off the parents twice");
+    }
+
+    #[test]
+    fn a_protected_node_that_left_the_tree_no_longer_guards_its_old_ancestors() {
+        let mut arena = Arena::default();
+        let root = arena.push(NONE, b"/tmp/root", 0, 0, Flags::DIR);
+        let boxed = arena.push(root, b"box", 0, 0, Flags::DIR);
+        let shelf = arena.push(boxed, b"shelf", 0, 0, Flags::DIR);
+        let vault = arena.push(shelf, b".vault", 0, 0, Flags::DIR);
+        arena.aggregate();
+        let index = ChildIndex::build(&arena);
+        let policy = Policy::from_toml(GUARD_POLICY).unwrap();
+        let ctx = PolicyContext { home: PathBuf::new(), now: 0 };
+        let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
+        let mut scan =
+            Scan { root: PathBuf::from("/tmp/root"), arena, index, hits, links: Hardlinks::default(), epoch: 0 };
+        assert!(protection(&policy, &scan, boxed).is_some());
+
+        scan.arena.mark_removed(vault);
+        assert_eq!(protection(&policy, &scan, boxed), None);
+        assert_eq!(protection(&policy, &scan, shelf), None);
+        let (items, refused) = plan_sweep(&policy, &scan, vec![boxed]).unwrap();
+        assert_eq!((items.len(), refused.len()), (1, 0));
     }
 
     const GUARD_POLICY: &str = r#"
@@ -1026,7 +1202,8 @@ mod tests {
         let policy = Policy::from_toml(GUARD_POLICY).unwrap();
         let ctx = PolicyContext { home: PathBuf::new(), now: 0 };
         let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
-        let mut scan = Scan { root: PathBuf::from("/tmp/root"), arena, index, hits, swept: (0, 0) };
+        let mut scan =
+            Scan { root: PathBuf::from("/tmp/root"), arena, index, hits, links: Hardlinks::default(), epoch: 0 };
 
         assert_eq!(guard_of(&policy, &scan, keep), Some(Guard { kind: "protected", reason: "Keep it.".into() }));
         assert_eq!(guard_of(&policy, &scan, loose), Some(Guard { kind: "risky", reason: "Big file.".into() }));
@@ -1044,7 +1221,7 @@ mod tests {
         );
 
         let outcomes = items.into_iter().map(|(id, _, _, size)| (id, size, Ok(()))).collect();
-        let result = finish_sweep(Some(&mut scan), outcomes, refused.clone());
+        let result = finish_sweep(&policy, Some(&mut scan), outcomes, refused.clone());
 
         assert_eq!(result.trashed, vec![loose, inner]);
         assert_eq!(result.bytes, 10);
@@ -1068,9 +1245,10 @@ mod tests {
         let root = resolve_root(link.to_str().unwrap()).unwrap();
         assert_eq!(root, fs::canonicalize(base.join("real")).unwrap());
         let cfg = ScanConfig { root: root.clone(), threads: 2, cross_mounts: false, qos: false };
-        let arena = scan_macos::walk(&cfg, &Progress::default(), &Cancel::new(false)).unwrap();
+        let links = HardlinkSet::default();
+        let arena = scan_macos::walk(&cfg, &Progress::default(), &Cancel::new(false), &links).unwrap();
         let index = ChildIndex::build(&arena);
-        let scan = Scan { root, arena, index, hits: PolicyHits::default(), swept: (0, 0) };
+        let scan = Scan { root, arena, index, hits: PolicyHits::default(), links: links.finish(), epoch: 0 };
 
         let f = find_node(&scan, &fs::canonicalize(link.join("sub/f")).unwrap());
         assert_ne!(f, NONE);
@@ -1103,7 +1281,7 @@ mod tests {
         let index = ChildIndex::build(&arena);
         let ctx = PolicyContext { home: home.to_path_buf(), now };
         let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
-        let scan = Scan { root: root.to_path_buf(), arena, index, hits, swept: (0, 0) };
+        let scan = Scan { root: root.to_path_buf(), arena, index, hits, links: Hardlinks::default(), epoch: 0 };
         collect_suggestions(&policy, &scan, &ctx)
     }
 
