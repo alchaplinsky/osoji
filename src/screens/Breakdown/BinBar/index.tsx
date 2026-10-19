@@ -1,4 +1,4 @@
-import { useState, type DragEvent } from "react";
+import { useState, type DragEvent, type Ref } from "react";
 import type { BinItem } from "../../../lib/types";
 import { humanBytes } from "../../../lib/format";
 import { Button, Icon, Mono, cx } from "../../../components/ui";
@@ -7,6 +7,7 @@ import { readBinDrop } from "./drag";
 import styles from "./BinBar.module.css";
 
 export { startBinDrag } from "./drag";
+export { flyToBin } from "./fly";
 
 type BinBarProps = {
   items: BinItem[];
@@ -15,11 +16,13 @@ type BinBarProps = {
   onReview: () => void;
   wide: boolean;
   floating?: boolean;
+  /** The bin's icon, where items clicked into the bin fly to. */
+  targetRef?: Ref<HTMLSpanElement>;
 };
 
 const VISIBLE_CHIPS = 3;
 
-export default function BinBar({ items, onRemove, onDrop, onReview, wide, floating }: BinBarProps) {
+export default function BinBar({ items, onRemove, onDrop, onReview, wide, floating, targetRef }: BinBarProps) {
   const [over, setOver] = useState(false);
   const empty = items.length === 0;
   const total = items.reduce((sum, item) => sum + item.size, 0);
@@ -49,7 +52,9 @@ export default function BinBar({ items, onRemove, onDrop, onReview, wide, floati
       onDragLeave={dragLeave}
       onDrop={drop}
     >
-      <Icon name="trash" size={18} className={styles.icon} />
+      <span ref={targetRef} className={styles.target}>
+        <Icon name="trash" size={18} className={styles.icon} />
+      </span>
       <div className={styles.content}>
         {empty && <div className={styles.empty}>Drop items here, or tick them. Nothing goes until you review.</div>}
         {chips.map((item) => (

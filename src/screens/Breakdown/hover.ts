@@ -31,7 +31,7 @@ export function hoverTarget(view: ViewNode, root: ViewNode, theme: ThemeName, ho
     const node = path.at(-1);
     if (!node || path.length < 2) continue;
     const top = tree.children.indexOf(path[1]);
-    return { name: nodeName(node), size: node.size, pct: share(node.size, whole(tree)), fill: nodeFill(path[1], theme, top), error: node.error };
+    return { name: nodeName(node), size: node.size, pct: share(node.size, whole(tree)), fill: nodeFill(path[1], theme, top, tree.children.length), error: node.error };
   }
   return null;
 }

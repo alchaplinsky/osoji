@@ -26,12 +26,15 @@
 
 .moon {
   cursor: pointer;
-  transition: opacity .25s;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: opacity .25s, transform .32s var(--ease-glide);
 }
 .rest { cursor: default; }
+.lifted { transform: scale(1.06); }
 
 .core {
-  fill: var(--card);
+  fill: color-mix(in srgb, var(--fg) 3.5%, transparent);
   stroke: var(--line);
   stroke-width: 1;
   cursor: pointer;

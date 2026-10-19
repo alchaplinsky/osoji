@@ -1,0 +1,62 @@
+/* A glass HTML chart piece tinted by its `--seg` colour: hairline edge, top gloss and a soft halo in its own
+   colour, lettered in a dark ink of its own hue. A chart can add a transition of its own through
+   `--piece-transition`. */
+.piece {
+  background: linear-gradient(165deg, color-mix(in oklch, var(--seg) var(--glass-hi), transparent), color-mix(in oklch, var(--seg) var(--glass-lo), transparent));
+  border: 1px solid var(--glass-edge);
+  box-shadow: inset 0 1px 0 var(--glass-gloss), 0 6px 18px color-mix(in oklch, var(--seg) var(--glass-glow), transparent);
+  color: color-mix(in oklch, var(--seg) 22%, #0B0A09);
+  transition:
+    opacity .25s,
+    transform .32s var(--ease-glide),
+    box-shadow .32s var(--ease-glide),
+    border-color .32s var(--ease-glide),
+    var(--piece-transition, background 0s);
+}
+
+/* Hover keeps the fill: a brighter edge and a stronger glow. Each chart adds its own lift (a scale about the right origin). */
+.hovered {
+  border-color: var(--glass-edge-hover);
+  box-shadow: inset 0 1px 0 var(--glass-gloss), 0 12px 26px color-mix(in oklch, var(--seg) var(--glass-glow-hover), transparent);
+}
+
+/* Neutral pieces (smaller items, the Trash) are dark grey on dark themes, so they keep the theme's text colour. */
+.muted { color: var(--fg); }
+
+/* In the bin: a hatched slot where the piece was. */
+.binned {
+  background: repeating-linear-gradient(135deg, var(--hatch-line) 0 2px, transparent 2px 8px);
+  border: 1px dashed var(--line2);
+  box-shadow: none;
+  color: var(--fg2);
+}
+
+/* The same look for SVG shapes: a flat tint, with the gloss drawn on top by a second shape. Glows are GlassDefs
+   filters set as attributes: WebKit ignores CSS filter functions on shapes inside an SVG. */
+.shape {
+  fill: color-mix(in oklch, var(--seg) var(--glass-hi), transparent);
+  stroke: var(--glass-edge);
+  stroke-width: 1;
+  transition: stroke .32s var(--ease-glide);
+}
+.hovered .shape { stroke: var(--glass-edge-hover); }
+.binned .shape {
+  stroke: var(--line2);
+  stroke-dasharray: 3 3;
+}
+.gloss { pointer-events: none; }
+
+/* The hover glow: a blurred, whitened copy under the shape. A filter cannot be faded, so the copy's opacity is;
+   it fades in when first drawn too, since it only exists for recently hovered shapes. */
+.halo {
+  fill: color-mix(in oklch, var(--seg), white 30%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .32s var(--ease-glide);
+}
+.hovered .halo {
+  opacity: .85;
+  animation: appear .32s var(--ease-glide);
+}
+
+@keyframes appear { from { opacity: 0; } }

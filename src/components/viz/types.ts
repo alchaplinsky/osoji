@@ -13,10 +13,13 @@ export type VizProps = {
   onHover: (id: HoverId) => void;
   onDrill: (id: number) => void;
   onUp: () => void;
-  onSelectFile: (id: number) => void;
+  /** Click on a file; `source` is the piece clicked, for animating it into the bin. */
+  onSelectFile: (id: number, source?: Element) => void;
   onDragStart?: (e: DragEvent, id: number) => void;
   /** Right-click on a real node (not the "other" slice). */
   onContextMenu?: (e: MouseEvent, id: number) => void;
+  /** Ids queued in the bin; their pieces are drawn as hatched slots. */
+  binIds?: ReadonlySet<number>;
   /** Set when `view` is the root of a disk scan; the sunburst then spans the whole disk. */
   disk?: Disk;
   centerSize?: number;

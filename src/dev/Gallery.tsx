@@ -118,7 +118,7 @@ function Primitives() {
         <div style={{ width: 220, display: "flex", flexDirection: "column", gap: 10 }}>
           <ProgressBar value={61} height={3} />
           <ProgressBar value={88} height={4} color="var(--review)" />
-          <ProgressBar value={35} height={8} color={tone(theme, 3)} />
+          <ProgressBar value={35} height={8} color={tone(theme, 3, STOPS.length)} />
           <ProgressBar value={100} height={8} />
         </div>
       </Row>
@@ -134,7 +134,7 @@ function Primitives() {
         {[1, 2, 3].map((depth) => (
           <div key={depth} style={{ display: "flex", gap: 4 }}>
             {STOPS.map((_, i) => (
-              <span key={i} title={tone(theme, i, depth)} style={{ width: 22, height: 22, borderRadius: 6, background: tone(theme, i, depth) }} />
+              <span key={i} title={tone(theme, i, STOPS.length, depth)} style={{ width: 22, height: 22, borderRadius: 6, background: tone(theme, i, STOPS.length, depth) }} />
             ))}
             <span style={{ width: 22, height: 22, borderRadius: 6, background: neutral(theme) }} />
           </div>
