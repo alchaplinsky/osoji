@@ -5,9 +5,9 @@ mod live;
 #[cfg(target_os = "macos")]
 mod zoom;
 
-use scan_core::live::Hardlinks;
+use scan_core::live::{detach, is_gone, Detached, Hardlinks};
 use scan_core::{Arena, Cancel, ChildIndex, Flags, HardlinkSet, NodeId, Progress, ScanConfig, NONE};
-use scan_policy::{covering, Kind, Policy, PolicyContext, PolicyHits, Safety};
+use scan_policy::{covering, Kind, Policy, PolicyContext, PolicyHits, Safety, POLICY_FLAGS};
 use serde::Serialize;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashSet};
@@ -30,6 +30,16 @@ struct Scan {
     swept: (u64, u32),
     /// Bumped by every change to the arena, so a live update can tell its listings went stale (live.rs).
     epoch: u64,
+}
+
+impl Scan {
+    /// Match `ids` against the policy again after a live change or a sweep: size and age rules
+    /// test a node's own size or a directory's total, and those moved.
+    fn restamp(&mut self, policy: &Policy, ctx: &PolicyContext, mut ids: Vec<NodeId>) {
+        ids.sort_unstable();
+        ids.dedup();
+        policy.resolve(&self.arena, &self.index, ctx).stamp_ids(&mut self.arena, ids, &mut self.hits);
+    }
 }
 
 #[derive(Default)]
@@ -55,8 +65,6 @@ struct Guard {
     kind: &'static str,
     reason: String,
 }
-
-const POLICY_FLAGS: Flags = Flags::TRASH_FOLDER.union(Flags::PROTECTED).union(Flags::RISKY).union(Flags::UNEXPECTED);
 
 fn guard_of(policy: &Policy, scan: &Scan, id: NodeId) -> Option<Guard> {
     if !scan.arena.flags[id as usize].intersects(POLICY_FLAGS) {
@@ -93,6 +101,8 @@ struct ScanSummary {
     errors: u64,
     elapsed_ms: u64,
     cancelled: bool,
+    /// Whether a watcher follows the scan now in place, so the UI can tell a stale view from a live one.
+    live: bool,
 }
 
 #[derive(Serialize)]
@@ -332,13 +342,14 @@ async fn scan(
     state.cancel.lock().unwrap().take();
 
     let cancelled = cancel.load(Ordering::Relaxed);
-    let summary = |arena: &Arena| ScanSummary {
+    let summary = |arena: &Arena, live: bool| ScanSummary {
         root: root.clone(),
         entries: arena.len(),
         bytes: arena.size[0],
         errors: progress.errors.load(Ordering::Relaxed),
         elapsed_ms: t0.elapsed().as_millis() as u64,
         cancelled,
+        live,
     };
     let walked = task.map_err(|e| e.to_string()).and_then(|r| r.map_err(|e| e.to_string()));
     // A stopped walk leaves every unfinished directory under-counted, so it never replaces the
@@ -347,10 +358,11 @@ async fn scan(
         Ok(walked) if !cancelled => walked,
         other => {
             settle(app, watcher).await;
-            return other.map(|(arena, _)| summary(&arena));
+            let live = state.watcher.lock().unwrap().is_some();
+            return other.map(|(arena, _)| summary(&arena, live));
         }
     };
-    let summary = summary(&arena);
+    let summary = summary(&arena, watcher.is_some());
     let index = ChildIndex::build(&arena);
     let ctx = PolicyContext { home: home_path(), now: unix_now() };
     let hits = state.policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
@@ -686,15 +698,18 @@ fn plan_sweep(policy: &Policy, scan: &Scan, nodes: Vec<NodeId>) -> Result<(Vec<S
     Ok((items, refused))
 }
 
-/// Fold the delete outcomes into the tree. `live` is None when another scan replaced the arena
-/// meanwhile: the items are still reported as moved, but nothing is marked.
+/// Fold the delete outcomes into the tree and match the ancestors, whose totals moved, against
+/// `policy` again. `live` is None when another scan replaced the arena meanwhile: the items are
+/// still reported as moved, but nothing is marked.
 fn finish_sweep(
+    policy: &Policy,
     mut live: Option<&mut Scan>,
     outcomes: Vec<(NodeId, u64, Result<(), String>)>,
     mut failed: Vec<String>,
 ) -> TrashResult {
     let mut bytes = 0u64;
     let mut trashed = Vec::new();
+    let mut touched = Vec::new();
     for (id, size, outcome) in outcomes {
         if let Err(e) = outcome {
             failed.push(e);
@@ -705,15 +720,24 @@ fn finish_sweep(
             bytes += size;
             continue;
         };
-        let moved = scan.arena.mark_trashed(id);
+        // A live update that saw the delete first took it off the tree, but it still went to the
+        // Trash. Otherwise count what emptying the Trash frees: nothing while another hard link lives.
+        let moved = if is_gone(&scan.arena, id) {
+            size
+        } else {
+            detach(&mut scan.arena, &scan.index, &mut scan.links, id, Detached::Trashed)
+        };
         scan.epoch += 1;
         bytes += moved;
         scan.swept = (scan.swept.0 + moved, scan.swept.1 + 1);
-        let mut p = scan.arena.parent[id as usize];
-        while p != NONE {
+        let up = ancestors_of(&scan.arena, id);
+        for &p in &up {
             scan.index.resort(&scan.arena, p);
-            p = scan.arena.parent[p as usize];
         }
+        touched.extend(up);
+    }
+    if let Some(scan) = live.filter(|_| !touched.is_empty()) {
+        scan.restamp(policy, &PolicyContext { home: home_path(), now: unix_now() }, touched);
     }
     TrashResult { bytes, count: trashed.len(), trashed, failed }
 }
@@ -769,7 +793,7 @@ async fn sweep(
     let mut guard = state.scan.lock().unwrap();
     // A scan that finished meanwhile replaced the arena: the ids no longer point at what was deleted.
     let live = guard.as_mut().filter(|_| state.generation.load(Ordering::Acquire) == generation);
-    Ok(finish_sweep(live, outcomes, refused))
+    Ok(finish_sweep(&state.policy, live, outcomes, refused))
 }
 
 #[derive(Serialize)]
@@ -782,9 +806,15 @@ struct TrashInfo {
 }
 
 /// The user's Trash folder as scanned, plus what Osoji moved there since. None when the scan does not cover it.
+/// A Trash deleted and recreated keeps its old, detached node and hit, which must not win.
 fn trash_of(policy: &Policy, scan: &Scan) -> Option<TrashInfo> {
-    let id = scan.hits.iter().filter(|&(_, rule)| policy.rule(rule).kind == Kind::Trash).map(|(id, _)| id).min()?;
     let a = &scan.arena;
+    let id = scan
+        .hits
+        .iter()
+        .filter(|&(id, rule)| policy.rule(rule).kind == Kind::Trash && !a.flags[id as usize].intersects(DETACHED))
+        .map(|(id, _)| id)
+        .min()?;
     Some(TrashInfo {
         id,
         path: a.path(id).to_string_lossy().into_owned(),
@@ -1081,7 +1111,7 @@ mod tests {
         let info = trash_of(&policy, &scan).unwrap();
         assert_eq!((info.id, info.path.as_str(), info.size, info.items), (trash, "/tmp/root/.Trash", 100, 1));
 
-        finish_sweep(Some(&mut scan), vec![(report, 20, Ok(()))], Vec::new());
+        finish_sweep(&policy, Some(&mut scan), vec![(report, 20, Ok(()))], Vec::new());
         let info = trash_of(&policy, &scan).unwrap();
         assert_eq!((info.size, info.items), (120, 2));
 
@@ -1148,7 +1178,7 @@ mod tests {
         );
 
         let outcomes = items.into_iter().map(|(id, _, _, size)| (id, size, Ok(()))).collect();
-        let result = finish_sweep(Some(&mut scan), outcomes, refused.clone());
+        let result = finish_sweep(&policy, Some(&mut scan), outcomes, refused.clone());
 
         assert_eq!(result.trashed, vec![loose, inner]);
         assert_eq!(result.bytes, 10);
