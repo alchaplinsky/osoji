@@ -38,6 +38,15 @@ impl Scan {
         ids.dedup();
         policy.resolve(&self.arena, &self.index, ctx).stamp_ids(&mut self.arena, ids, &mut self.hits);
     }
+
+    /// Bring the child index up to date after a live change: index the nodes appended since, and
+    /// re-sort the children of `resorted`, the directories whose totals moved.
+    fn reindex(&mut self, resorted: impl IntoIterator<Item = NodeId>) {
+        self.index.extend(&self.arena);
+        for id in resorted {
+            self.index.resort(&self.arena, id);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -53,8 +62,23 @@ struct AppState {
     watcher: Mutex<Option<scan_macos::Watcher>>,
     /// Watcher batches held back while a scan runs, applied once its result is in place.
     pending: Mutex<Option<Vec<scan_macos::Batch>>>,
+    /// The last scan's wind-down (retiring its predecessor's watcher, applying `pending`), which
+    /// runs after the scan command returns; the next scan waits for it before queueing anew.
+    settling: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     /// Held for the whole of each live apply, so two never interleave their phases.
     applying: Mutex<()>,
+    /// Directories changed by live applies, waiting to go to the UI as one event (live.rs).
+    changed: Mutex<Vec<NodeId>>,
+}
+
+/// Run `f` against the app state off the main thread. Every command that reads the scan goes
+/// through this: Tauri runs plain commands on the main thread, where waiting for the scan lock
+/// while a live apply holds it, or a pass over a few million nodes, would freeze the window.
+async fn off_main<T: Send + 'static>(
+    app: tauri::AppHandle,
+    f: impl FnOnce(&AppState) -> T + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(move || f(&app.state::<AppState>())).await.map_err(|e| e.to_string())
 }
 
 /// Why the UI should treat a node with care: "trash", "protected", "risky" or "unexpected".
@@ -267,20 +291,43 @@ async fn start_scan(
     if state.running.swap(true, Ordering::AcqRel) {
         return Err("a scan is already running".into());
     }
-    // Cleared only once the queued batches are applied, so a next scan cannot start queueing over them.
-    let result = scan(&app, &state, root, threads, on_progress).await;
+    // The last scan may still be applying what queued during its walk; that has to land before this
+    // one starts queueing, or its drain would take this scan's queue.
+    let settling = state.settling.lock().unwrap().take();
+    if let Some(settling) = settling {
+        let _ = settling.await;
+    }
+    let (result, retired) = scan(&app, &state, root, threads, on_progress).await;
+    // Off the return path, so the UI gets the summary as soon as the tree is in place. Off the
+    // async thread too: dropping the retired watcher joins its thread, which may be mid-batch, and
+    // applying lists and walks directories. The drop comes first so nothing that watcher still
+    // delivers is left in the queue.
+    let handle = {
+        let app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            drop(retired);
+            live::drain(&app.state::<AppState>(), live::notify(&app));
+        })
+    };
+    *state.settling.lock().unwrap() = Some(handle);
     state.running.store(false, Ordering::Release);
     result
 }
 
+/// Walk `root` and, unless stopped or failed, make it the current scan. Also returns the watcher
+/// that no longer follows the current scan (the predecessor's on success, this scan's otherwise),
+/// for the caller to retire.
 async fn scan(
     app: &tauri::AppHandle,
     state: &AppState,
     root: String,
     threads: Option<usize>,
     on_progress: Channel<ProgressMsg>,
-) -> Result<ScanSummary, String> {
-    let canonical = resolve_root(&root)?;
+) -> (Result<ScanSummary, String>, Option<scan_macos::Watcher>) {
+    let canonical = match resolve_root(&root) {
+        Ok(canonical) => canonical,
+        Err(e) => return (Err(e), None),
+    };
     // Before the watcher starts, so a stop during its half-second start already reaches the walk.
     let cancel = Arc::new(AtomicBool::new(false));
     *state.cancel.lock().unwrap() = Some(cancel.clone());
@@ -355,9 +402,9 @@ async fn scan(
     let (mut arena, links) = match walked {
         Ok(walked) if !cancelled => walked,
         other => {
-            settle(app, watcher).await;
+            // The result is not kept, so neither is its watcher; the scan that stays is as live as it was.
             let live = state.watcher.lock().unwrap().is_some();
-            return other.map(|(arena, _)| summary(&arena, live));
+            return (other.map(|(arena, _)| summary(&arena, live)), watcher);
         }
     };
     let summary = summary(&arena, watcher.is_some());
@@ -370,20 +417,7 @@ async fn scan(
         state.generation.fetch_add(1, Ordering::AcqRel);
     }
     let old = std::mem::replace(&mut *state.watcher.lock().unwrap(), watcher);
-    settle(app, old).await;
-    Ok(summary)
-}
-
-/// Drop `watcher`, then apply the batches queued while a scan ran. Off the async thread: dropping
-/// joins the watcher's thread, which may be mid-batch, and applying lists and walks directories.
-/// After the drop, so nothing that watcher still delivers is left in the queue.
-async fn settle(app: &tauri::AppHandle, watcher: Option<scan_macos::Watcher>) {
-    let app = app.clone();
-    let _ = tauri::async_runtime::spawn_blocking(move || {
-        drop(watcher);
-        live::drain(&app.state::<AppState>(), live::notify(&app));
-    })
-    .await;
+    (Ok(summary), old)
 }
 
 /// Canonical, because `Scan.root` is canonical and a home reached through a symlink must still match.
@@ -438,53 +472,62 @@ fn build_view(policy: &Policy, scan: &Scan, id: NodeId, depth: u8, top_k: usize,
 }
 
 #[tauri::command]
-fn get_view(
-    state: State<'_, AppState>,
+async fn get_view(
+    app: tauri::AppHandle,
     node: NodeId,
     depth: u8,
     top_k: usize,
     min_fraction: f64,
 ) -> Result<ViewNode, String> {
-    let guard = state.scan.lock().unwrap();
-    let scan = guard.as_ref().ok_or("no scan loaded")?;
-    if (node as usize) >= scan.arena.len() {
-        return Err("unknown node".into());
-    }
-    let min_size = (scan.arena.size[node as usize] as f64 * min_fraction) as u64;
-    Ok(build_view(&state.policy, scan, node, depth, top_k, min_size.max(1)))
-}
-
-#[tauri::command]
-fn node_info(state: State<'_, AppState>, node: NodeId) -> Result<NodeInfo, String> {
-    let guard = state.scan.lock().unwrap();
-    let scan = guard.as_ref().ok_or("no scan loaded")?;
-    let a = &scan.arena;
-    if (node as usize) >= a.len() {
-        return Err("unknown node".into());
-    }
-    let ancestors = ancestors_of(a, node).into_iter().map(|id| Crumb { id, name: name_of(a, id) }).collect();
-    let f = a.flags[node as usize];
-    Ok(NodeInfo {
-        id: node,
-        name: name_of(a, node),
-        path: a.path(node).to_string_lossy().into_owned(),
-        size: a.size[node as usize],
-        items: a.items[node as usize],
-        dir: f.contains(Flags::DIR),
-        error: f.contains(Flags::ERROR),
-        // The UI treats both the same: the node is no longer on disk where the scan saw it.
-        trashed: f.intersects(DETACHED),
-        mtime: a.mtime[node as usize],
-        ancestors,
-        guard: guard_of(&state.policy, scan, node),
+    off_main(app, move |state| {
+        let guard = state.scan.lock().unwrap();
+        let scan = guard.as_ref().ok_or("no scan loaded")?;
+        if (node as usize) >= scan.arena.len() {
+            return Err("unknown node".into());
+        }
+        let min_size = (scan.arena.size[node as usize] as f64 * min_fraction) as u64;
+        Ok(build_view(&state.policy, scan, node, depth, top_k, min_size.max(1)))
     })
+    .await?
 }
 
 #[tauri::command]
-fn largest_files(state: State<'_, AppState>, limit: usize) -> Result<Vec<FileEntry>, String> {
-    let guard = state.scan.lock().unwrap();
-    let scan = guard.as_ref().ok_or("no scan loaded")?;
-    Ok(largest(&state.policy, scan, limit))
+async fn node_info(app: tauri::AppHandle, node: NodeId) -> Result<NodeInfo, String> {
+    off_main(app, move |state| {
+        let guard = state.scan.lock().unwrap();
+        let scan = guard.as_ref().ok_or("no scan loaded")?;
+        let a = &scan.arena;
+        if (node as usize) >= a.len() {
+            return Err("unknown node".into());
+        }
+        let ancestors = ancestors_of(a, node).into_iter().map(|id| Crumb { id, name: name_of(a, id) }).collect();
+        let f = a.flags[node as usize];
+        Ok(NodeInfo {
+            id: node,
+            name: name_of(a, node),
+            path: a.path(node).to_string_lossy().into_owned(),
+            size: a.size[node as usize],
+            items: a.items[node as usize],
+            dir: f.contains(Flags::DIR),
+            error: f.contains(Flags::ERROR),
+            // The UI treats both the same: the node is no longer on disk where the scan saw it.
+            trashed: f.intersects(DETACHED),
+            mtime: a.mtime[node as usize],
+            ancestors,
+            guard: guard_of(&state.policy, scan, node),
+        })
+    })
+    .await?
+}
+
+#[tauri::command]
+async fn largest_files(app: tauri::AppHandle, limit: usize) -> Result<Vec<FileEntry>, String> {
+    off_main(app, move |state| {
+        let guard = state.scan.lock().unwrap();
+        let scan = guard.as_ref().ok_or("no scan loaded")?;
+        Ok(largest(&state.policy, scan, limit))
+    })
+    .await?
 }
 
 /// The `limit` largest files and packages, skipping what is already in the Trash.
@@ -527,11 +570,14 @@ fn is_writable(dir: &Path) -> bool {
 }
 
 #[tauri::command]
-fn suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
-    let guard = state.scan.lock().unwrap();
-    let scan = guard.as_ref().ok_or("no scan loaded")?;
-    let ctx = PolicyContext { home: home_path(), now: unix_now() };
-    Ok(collect_suggestions(&state.policy, scan, &ctx))
+async fn suggestions(app: tauri::AppHandle) -> Result<Vec<Suggestion>, String> {
+    off_main(app, |state| {
+        let guard = state.scan.lock().unwrap();
+        let scan = guard.as_ref().ok_or("no scan loaded")?;
+        let ctx = PolicyContext { home: home_path(), now: unix_now() };
+        Ok(collect_suggestions(&state.policy, scan, &ctx))
+    })
+    .await?
 }
 
 const MAX_SUGGESTIONS: usize = 200;
@@ -610,34 +656,38 @@ fn gone_or_in_trash(a: &Arena, mut id: NodeId) -> bool {
 }
 
 #[tauri::command]
-fn watch_status(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<WatchHit>, String> {
-    let guard = state.scan.lock().unwrap();
-    let scan = guard.as_ref().ok_or("no scan loaded")?;
-    let a = &scan.arena;
-    Ok(paths
-        .into_iter()
-        .map(|path| {
-            // The scan root is canonical; a path that no longer resolves is gone.
-            let id = std::fs::canonicalize(&path).map_or(NONE, |p| find_node(scan, &p));
-            if id == NONE || gone_or_in_trash(a, id) {
-                return WatchHit { path, id: None, size: 0, dir: false };
-            }
-            let i = id as usize;
-            WatchHit { path, id: Some(id), size: a.size[i], dir: a.flags[i].contains(Flags::DIR) }
-        })
-        .collect())
+async fn watch_status(app: tauri::AppHandle, paths: Vec<String>) -> Result<Vec<WatchHit>, String> {
+    off_main(app, move |state| {
+        let guard = state.scan.lock().unwrap();
+        let scan = guard.as_ref().ok_or("no scan loaded")?;
+        let a = &scan.arena;
+        Ok(paths
+            .into_iter()
+            .map(|path| {
+                // The scan root is canonical; a path that no longer resolves is gone.
+                let id = std::fs::canonicalize(&path).map_or(NONE, |p| find_node(scan, &p));
+                if id == NONE || gone_or_in_trash(a, id) {
+                    return WatchHit { path, id: None, size: 0, dir: false };
+                }
+                let i = id as usize;
+                WatchHit { path, id: Some(id), size: a.size[i], dir: a.flags[i].contains(Flags::DIR) }
+            })
+            .collect())
+    })
+    .await?
 }
 
 #[tauri::command]
-fn reveal(state: State<'_, AppState>, node: NodeId) -> Result<(), String> {
-    let path = {
+async fn reveal(app: tauri::AppHandle, node: NodeId) -> Result<(), String> {
+    let path = off_main(app, move |state| -> Result<PathBuf, String> {
         let guard = state.scan.lock().unwrap();
         let scan = guard.as_ref().ok_or("no scan loaded")?;
         if (node as usize) >= scan.arena.len() {
             return Err("unknown node".into());
         }
-        scan.arena.path(node)
-    };
+        Ok(scan.arena.path(node))
+    })
+    .await??;
     std::process::Command::new("open").arg("-R").arg(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
@@ -827,9 +877,12 @@ fn trash_of(policy: &Policy, scan: &Scan) -> Option<TrashInfo> {
 }
 
 #[tauri::command]
-fn trash_info(state: State<'_, AppState>) -> Option<TrashInfo> {
-    let guard = state.scan.lock().unwrap();
-    trash_of(&state.policy, guard.as_ref()?)
+async fn trash_info(app: tauri::AppHandle) -> Result<Option<TrashInfo>, String> {
+    off_main(app, |state| {
+        let guard = state.scan.lock().unwrap();
+        trash_of(&state.policy, guard.as_ref()?)
+    })
+    .await
 }
 
 #[tauri::command]

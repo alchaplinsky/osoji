@@ -14,28 +14,37 @@
 //! back as a new live node. So when the epoch moved since the snapshot, nothing is applied and
 //! the batch starts over from a fresh snapshot and fresh listings. Sweeps run one at a time and
 //! bump the epoch once each, and applies are serialized, so this converges in a retry or two.
-//! The second locked phase only grafts walks of directories the first one inserted, which no
-//! sweep can reach (they are not in the index yet, and a graft under a node detached meanwhile is
-//! skipped), so it checks `generation` alone; giving up there would leave the index without the
-//! nodes the first phase inserted.
+//! The second locked phase only grafts walks of directories the first one inserted: a graft under
+//! a node swept or removed meanwhile is skipped, and no graft can bring back what a listing
+//! dropped, so it checks `generation` alone; giving up there would leave those directories empty.
 //!
-//! A scan in progress queues batches in `AppState.pending` instead; `drain` applies them once its
-//! result is in place. Applies hold `AppState.applying` throughout, so the watcher threads (two
-//! while a new scan replaces the old) and the drain never interleave phases.
+//! Each locked phase leaves the child index covering every node it appended (`Scan::reindex`), so
+//! anything that runs between phases, a sweep or a view, sees a complete index.
+//!
+//! A scan in progress queues batches in `AppState.pending` instead; `drain` applies them as one
+//! merged batch once its result is in place, after the scan command has returned. Applies hold
+//! `AppState.applying` throughout, so the watcher threads (two while a new scan replaces the old)
+//! and the drain never interleave phases.
 
 use crate::{ancestors_of, find_node, home_path, unix_now, AppState, Scan};
 use scan_core::live::{graft, is_gone, reconcile, DirEntry, Hardlinks};
-use scan_core::{Arena, Cancel, ChildIndex, Flags, HardlinkSet, NodeId, Progress, ScanConfig, NONE};
+use scan_core::{Arena, Cancel, Flags, HardlinkSet, NodeId, Progress, ScanConfig, NONE};
 use scan_macos::{Batch, Watcher};
 use scan_policy::PolicyContext;
 use serde::Serialize;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Listened for in src/lib/api.ts.
 const EVENT: &str = "scan:changed";
+
+/// How long changed directories collect before one event carries them to the UI. System folders
+/// churn every few seconds, and each event has the UI re-read everything it shows; this keeps
+/// that to a steady, affordable pace without making a change feel late.
+const EMIT_WINDOW: Duration = Duration::from_millis(1500);
 
 /// Re-walks are usually small subtrees; a few threads keep them off the user's foreground work.
 const WALK_THREADS: usize = 2;
@@ -55,11 +64,32 @@ pub(crate) fn watch(app: AppHandle, root: &Path) -> io::Result<Watcher> {
     Watcher::start(root, move |batch| on_batch(&app.state::<AppState>(), batch, notify(&app)))
 }
 
-/// Tells the UI which directories changed.
+/// Tells the UI which directories changed, coalescing everything reported within `EMIT_WINDOW`
+/// of the first into one event.
 pub(crate) fn notify(app: &AppHandle) -> impl Fn(Vec<NodeId>) + '_ {
     move |dirs| {
-        if let Err(e) = app.emit(EVENT, Changed { dirs }) {
-            eprintln!("live: emit {EVENT}: {e}");
+        if dirs.is_empty() {
+            return;
+        }
+        let first = {
+            let state = app.state::<AppState>();
+            let mut pending = state.changed.lock().unwrap();
+            let first = pending.is_empty();
+            pending.extend(dirs);
+            first
+        };
+        // The first report of a window arms its timer; later ones just join the set it will send.
+        if first {
+            let app = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(EMIT_WINDOW);
+                let mut dirs = std::mem::take(&mut *app.state::<AppState>().changed.lock().unwrap());
+                dirs.sort_unstable();
+                dirs.dedup();
+                if let Err(e) = app.emit(EVENT, Changed { dirs }) {
+                    eprintln!("live: emit {EVENT}: {e}");
+                }
+            });
         }
     }
 }
@@ -73,13 +103,16 @@ fn on_batch(state: &AppState, batch: Batch, emit: impl Fn(Vec<NodeId>)) {
     apply_batch(state, batch, emit);
 }
 
-/// Stop queueing and apply what was queued, oldest first. Batches arriving meanwhile apply directly
-/// and may overtake the queue, which is harmless: every apply lists the disk as it is then.
+/// Stop queueing and apply what was queued as one batch: every listing sees the disk as it is
+/// now, so one apply does what applying each in turn would, for one index and policy pass instead
+/// of one per window of the walk. Batches arriving meanwhile apply directly and may overtake the
+/// queue, which is harmless for the same reason.
 pub(crate) fn drain(state: &AppState, emit: impl Fn(Vec<NodeId>)) {
     let queued = state.pending.lock().unwrap().take().unwrap_or_default();
-    for batch in queued {
-        apply_batch(state, batch, &emit);
+    if queued.is_empty() {
+        return;
     }
+    apply_batch(state, Batch::merge(queued), emit);
 }
 
 /// Fold one watcher batch into the scan. `emit` gets the directories whose contents changed,
@@ -195,11 +228,10 @@ impl Snapshot {
                 }
             }
             scan.epoch += 1;
-            // Inserts and grafts are not in the index, and every change reorders its ancestors' children.
-            scan.index = ChildIndex::build(&scan.arena);
             // Grafted-into directories descend from reconciled ones, whose chains are in `touched`.
+            scan.reindex(touched.iter().copied());
             touched.extend(first_new..scan.arena.len() as NodeId);
-            // Against the rebuilt index, so a pinned path that came back matches its new node.
+            // Against the extended index, so a pinned path that came back matches its new node.
             scan.restamp(&state.policy, &ctx, touched);
         });
         if applied.is_some() {
@@ -242,6 +274,8 @@ fn update(scan: &mut Scan, reads: Reads) -> Update {
             continue;
         };
         let r = reconcile(&mut scan.arena, &scan.index, &mut scan.links, dir, &listing);
+        // At once, so a later listing's detach walks a subtree this one added to.
+        scan.index.extend(&scan.arena);
         if r.is_empty() {
             continue;
         }
@@ -264,6 +298,7 @@ fn update(scan: &mut Scan, reads: Reads) -> Update {
         // An empty listing removes every child the way reconcile does, so their hard links hand over.
         reconcile(&mut scan.arena, &scan.index, &mut scan.links, id, &[]);
         graft(&mut scan.arena, &mut scan.links, &mut sub, sub_links, id);
+        scan.index.extend(&scan.arena);
         changed.push(id);
     }
     if !changed.is_empty() {
@@ -273,6 +308,10 @@ fn update(scan: &mut Scan, reads: Reads) -> Update {
         touched.push(dir);
         touched.extend(ancestors_of(&scan.arena, dir));
     }
+    touched.sort_unstable();
+    touched.dedup();
+    // Every change moved the totals along these chains, which is what orders their children.
+    scan.reindex(touched.iter().copied());
     Update { first_new, changed, touched, new_dirs }
 }
 
@@ -342,6 +381,7 @@ fn walk(path: &Path) -> Option<Tree> {
 mod tests {
     use super::*;
     use crate::{finish_sweep, plan_sweep};
+    use scan_core::ChildIndex;
     use scan_policy::Policy;
     use std::cell::RefCell;
     use std::fs;
@@ -534,6 +574,35 @@ mod tests {
         assert_eq!(emitted.into_inner(), vec![vec![id_of(&state, &root.join("a"))]]);
         assert_fresh(&state, &root);
         fs::remove_dir_all(&old_root).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn queued_batches_drain_as_one_apply() {
+        let root = temp_root("queue-merge");
+        let state = state_for(&root);
+        let (a, sub) = (root.join("a"), root.join("a/sub"));
+        let (a_id, sub_id) = (id_of(&state, &a), id_of(&state, &sub));
+        *state.pending.lock().unwrap() = Some(Vec::new());
+
+        // Three windows of changes, two naming the same directory.
+        fs::remove_file(a.join("x")).unwrap();
+        write(&sub.join("w"), 7_000);
+        fs::create_dir_all(a.join("new")).unwrap();
+        write(&a.join("new/f"), 3_000);
+        let emitted = RefCell::new(Vec::new());
+        let emit = |ids: Vec<NodeId>| emitted.borrow_mut().push(ids);
+        on_batch(&state, dirs(&[&a]), emit);
+        on_batch(&state, dirs(&[&sub]), emit);
+        on_batch(&state, dirs(&[&a, &a.join("new")]), emit);
+        assert_eq!(state.pending.lock().unwrap().as_ref().map(Vec::len), Some(3));
+
+        drain(&state, emit);
+        let mut changed = vec![a_id, sub_id];
+        changed.sort_unstable();
+        assert_eq!(emitted.into_inner(), vec![changed], "one apply, one event for every changed directory");
+        assert_fresh(&state, &root);
+        assert_ne!(id_of(&state, &a.join("new/f")), NONE, "the new directory was walked and indexed");
         fs::remove_dir_all(&root).unwrap();
     }
 
