@@ -203,12 +203,16 @@ impl Arena {
     }
 }
 
-/// Children of every node, sorted by size descending, in CSR form.
-/// Built once after a scan so views never scan the whole arena. It cannot take new
-/// children: after `insert` or `graft`, build it again (once per batch of updates).
+/// Children of every node, sorted by size descending, each node's run contiguous in `list`.
+/// Built once after a scan so views never scan the whole arena, then kept current with
+/// `extend` as live updates append nodes: a node that gains children has its run moved to the
+/// end of `list`, leaving the old run as dead space that a rebuild reclaims once it dominates.
 pub struct ChildIndex {
     start: Vec<u32>,
+    end: Vec<u32>,
     list: Vec<NodeId>,
+    /// Slots in `list` no run points at any more.
+    dead: usize,
 }
 
 impl ChildIndex {
@@ -221,32 +225,102 @@ impl ChildIndex {
         for i in 0..n {
             start[i + 1] += start[i];
         }
-        let mut fill = start.clone();
+        let mut end = start.clone();
+        end.pop();
         let mut list = vec![0 as NodeId; n.saturating_sub(1)];
         for i in 1..n {
             let p = arena.parent[i] as usize;
-            list[fill[p] as usize] = i as NodeId;
-            fill[p] += 1;
+            list[end[p] as usize] = i as NodeId;
+            end[p] += 1;
         }
+        start.pop();
+        let mut index = Self { start, end, list, dead: 0 };
         for i in 0..n {
-            let (a, b) = (start[i] as usize, start[i + 1] as usize);
-            if b - a > 1 {
-                list[a..b].sort_unstable_by_key(|&c| std::cmp::Reverse(arena.size[c as usize]));
-            }
+            index.resort(arena, i as NodeId);
         }
-        Self { start, list }
+        index
+    }
+
+    /// How many nodes the index covers; nodes from here on are not indexed yet.
+    pub fn len(&self) -> usize {
+        self.start.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.start.is_empty()
     }
 
     pub fn children(&self, id: NodeId) -> &[NodeId] {
         let i = id as usize;
-        &self.list[self.start[i] as usize..self.start[i + 1] as usize]
+        &self.list[self.start[i] as usize..self.end[i] as usize]
     }
 
     /// Re-sort one node's children after sizes changed (e.g. after a trash).
     pub fn resort(&mut self, arena: &Arena, id: NodeId) {
         let i = id as usize;
-        let (a, b) = (self.start[i] as usize, self.start[i + 1] as usize);
-        self.list[a..b].sort_unstable_by_key(|&c| std::cmp::Reverse(arena.size[c as usize]));
+        let (a, b) = (self.start[i] as usize, self.end[i] as usize);
+        if b - a > 1 {
+            self.list[a..b].sort_unstable_by_key(|&c| std::cmp::Reverse(arena.size[c as usize]));
+        }
+    }
+
+    /// Index the nodes appended to `arena` since the index last covered it (`insert` and `graft`
+    /// only ever append). Costs the new nodes plus the children of each existing node that
+    /// gained one, instead of the whole arena.
+    pub fn extend(&mut self, arena: &Arena) {
+        let from = self.len();
+        let n = arena.len();
+        if from >= n {
+            return;
+        }
+        if self.dead > self.list.len() / 2 {
+            *self = Self::build(arena);
+            return;
+        }
+        // New nodes get contiguous runs after the current list, laid out by a counting pass.
+        let mut count = vec![0u32; n - from];
+        let mut to_old: Vec<(NodeId, NodeId)> = Vec::new();
+        for i in from..n {
+            let p = arena.parent[i] as usize;
+            if p >= from {
+                count[p - from] += 1;
+            } else {
+                to_old.push((p as NodeId, i as NodeId));
+            }
+        }
+        let mut cursor = self.list.len() as u32;
+        self.start.reserve(n - from);
+        self.end.reserve(n - from);
+        for &c in &count {
+            self.start.push(cursor);
+            self.end.push(cursor);
+            cursor += c;
+        }
+        self.list.resize(cursor as usize, 0);
+        for i in from..n {
+            let p = arena.parent[i] as usize;
+            if p >= from {
+                self.list[self.end[p] as usize] = i as NodeId;
+                self.end[p] += 1;
+            }
+        }
+        for p in from..n {
+            self.resort(arena, p as NodeId);
+        }
+        // An existing node that gained children has its run moved to the end, with the new ones appended.
+        to_old.sort_unstable();
+        for group in to_old.chunk_by(|a, b| a.0 == b.0) {
+            let p = group[0].0 as usize;
+            let (a, b) = (self.start[p] as usize, self.end[p] as usize);
+            if b != self.list.len() {
+                self.start[p] = self.list.len() as u32;
+                self.list.extend_from_within(a..b);
+                self.dead += b - a;
+            }
+            self.list.extend(group.iter().map(|&(_, c)| c));
+            self.end[p] = self.list.len() as u32;
+            self.resort(arena, p as NodeId);
+        }
     }
 }
 
@@ -367,6 +441,71 @@ pub struct ScanConfig {
     pub cross_mounts: bool,
     /// Run workers at user-initiated QoS so macOS schedules them on P-cores.
     pub qos: bool,
+}
+
+#[cfg(test)]
+mod child_index_tests {
+    use super::*;
+
+    fn arena_of(parents: &[(NodeId, u64)]) -> Arena {
+        let mut arena = Arena::default();
+        arena.push(NONE, b"r", 0, 1, Flags::DIR);
+        for (k, &(p, size)) in parents.iter().enumerate() {
+            arena.push(p, format!("n{k}").as_bytes(), size, 1, Flags::DIR);
+        }
+        arena
+    }
+
+    /// Every node's children, as a fresh build would list them.
+    fn assert_same_as_build(index: &ChildIndex, arena: &Arena) {
+        let fresh = ChildIndex::build(arena);
+        assert_eq!(index.len(), arena.len());
+        for id in 0..arena.len() as NodeId {
+            assert_eq!(index.children(id), fresh.children(id), "children of {id}");
+        }
+    }
+
+    #[test]
+    fn extend_indexes_appended_nodes_under_old_and_new_parents() {
+        // r: 1 (30), 2 (20); 1: 3 (5)
+        let mut arena = arena_of(&[(0, 30), (0, 20), (1, 5)]);
+        let mut index = ChildIndex::build(&arena);
+        assert_eq!(index.children(0), &[1, 2]);
+
+        // A child of the root between 1 and 2 in size, a child of 2 (first for it), and a new dir
+        // under 1 with children of its own, which lifts 1 to 41.
+        arena.insert(0, b"mid", 35, 1, Flags::empty());
+        arena.insert(2, b"c", 1, 1, Flags::empty());
+        let d = arena.insert(1, b"d", 0, 1, Flags::DIR);
+        arena.insert(d, b"e", 2, 1, Flags::empty());
+        arena.insert(d, b"f", 9, 1, Flags::empty());
+        index.extend(&arena);
+
+        assert_eq!(index.children(0), &[1, 4, 2]);
+        assert_eq!(index.children(2), &[5]);
+        assert_eq!(index.children(d), &[8, 7]);
+        assert_same_as_build(&index, &arena);
+
+        // Idempotent, and further rounds keep every run intact.
+        index.extend(&arena);
+        arena.insert(0, b"g", 1, 1, Flags::empty());
+        arena.insert(d, b"h", 100, 1, Flags::empty());
+        index.extend(&arena);
+        assert_same_as_build(&index, &arena);
+    }
+
+    #[test]
+    fn extend_rebuilds_once_dead_space_dominates() {
+        let mut arena = arena_of(&[(0, 1)]);
+        let mut index = ChildIndex::build(&arena);
+        // Distinct sizes: the sort is unstable, so ties could order differently from a build.
+        for k in 2..66u64 {
+            arena.insert(0, format!("f{k}").as_bytes(), k, 1, Flags::empty());
+            index.extend(&arena);
+            assert_same_as_build(&index, &arena);
+        }
+        assert!(index.dead <= index.list.len(), "dead space is bounded by the list");
+    }
 }
 
 #[cfg(test)]

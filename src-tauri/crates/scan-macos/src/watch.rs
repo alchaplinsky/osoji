@@ -34,6 +34,28 @@ pub struct Batch {
     pub rescan: Vec<PathBuf>,
 }
 
+impl Batch {
+    /// One batch standing for all of `batches`: a listing read for the merged batch sees the disk as
+    /// it is after every one of them, so applying it once is the same as applying each in turn.
+    pub fn merge(batches: impl IntoIterator<Item = Batch>) -> Batch {
+        let mut out = Batch::default();
+        for b in batches {
+            out.dirs.extend(b.dirs);
+            out.rescan.extend(b.rescan);
+        }
+        out.normalize();
+        out
+    }
+
+    fn normalize(&mut self) {
+        self.dirs.sort();
+        self.dirs.dedup();
+        // Path ordering is by component, so a subtree sorts directly after its root.
+        self.rescan.sort();
+        self.rescan.dedup_by(|later, earlier| later.starts_with(earlier));
+    }
+}
+
 /// Watches a root recursively until dropped.
 pub struct Watcher {
     root: PathBuf,
@@ -169,11 +191,7 @@ fn batch(root: &Path, probe: &Path, events: &[(PathBuf, fse::FSEventStreamEventF
             b.dirs.push(dir.to_path_buf());
         }
     }
-    b.dirs.sort();
-    b.dirs.dedup();
-    // Path ordering is by component, so a subtree sorts directly after its root.
-    b.rescan.sort();
-    b.rescan.dedup_by(|later, earlier| later.starts_with(earlier));
+    b.normalize();
     b
 }
 
@@ -387,6 +405,18 @@ mod tests {
 
         assert_eq!(in_r(&[ev(USER_DROPPED, "/"), ev(SCAN_SUBDIRS, "/r/a")]).rescan, paths(&["/r"]));
         assert_eq!(in_r(&[ev(KERNEL_DROPPED, "")]).rescan, paths(&["/r"]));
+    }
+
+    #[test]
+    fn merge_folds_batches_into_one_normalized_batch() {
+        let merged = Batch::merge([
+            in_r(&[ev(CREATED, "/r/b/f"), ev(CREATED, "/r/a/f")]),
+            in_r(&[ev(MODIFIED, "/r/a/g"), ev(SCAN_SUBDIRS, "/r/c/d")]),
+            in_r(&[ev(SCAN_SUBDIRS, "/r/c")]),
+        ]);
+        assert_eq!(merged.dirs, paths(&["/r/a", "/r/b"]));
+        assert_eq!(merged.rescan, paths(&["/r/c"]));
+        assert_eq!(Batch::merge([]), Batch::default());
     }
 
     #[test]

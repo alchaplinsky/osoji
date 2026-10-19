@@ -522,7 +522,10 @@ mod tests {
         arena.graft(&tree("d", &[("e", 10), ("f/", 64), ("f/g", 20)]), d);
         assert_matches(&arena, &[BASE, &[("d/", 64), ("d/e", 10), ("d/f/", 64), ("d/f/g", 20)]].concat());
         assert!((1..arena.len()).all(|i| (arena.parent[i] as usize) < i));
-        assert_eq!(ChildIndex::build(&arena).children(d).len(), 2);
+        let mut index = index;
+        index.extend(&arena);
+        assert_eq!(index.children(d).len(), 2);
+        assert_eq!(index.children(0).len(), 3);
     }
 
     #[test]
