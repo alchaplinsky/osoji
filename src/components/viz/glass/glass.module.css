@@ -24,22 +24,20 @@
   color: var(--fg2);
 }
 
-/* The same look for SVG shapes: a flat tint, with the gloss drawn on top by a second shape. */
+/* The same look for SVG shapes: a flat tint, with the gloss drawn on top by a second shape. Their glow is the
+   GlassDefs filters, set as an attribute: WebKit ignores CSS filter functions on shapes inside an SVG. */
 .shape {
   fill: color-mix(in oklch, var(--seg) var(--glass-hi), transparent);
   stroke: var(--glass-edge);
   stroke-width: 1;
-  transition: fill .25s, stroke .18s, filter .18s;
+  transition: fill .25s, stroke .18s;
 }
-.glow { filter: drop-shadow(0 0 6px color-mix(in oklch, var(--seg) var(--glass-glow), transparent)); }
 .hovered .shape {
   fill: color-mix(in oklch, var(--seg) var(--glass-hover-hi), transparent);
   stroke: var(--glass-edge-hover);
-  filter: drop-shadow(0 0 10px color-mix(in oklch, var(--seg) var(--glass-glow-hover), transparent));
 }
 .binned .shape {
   stroke: var(--line2);
   stroke-dasharray: 3 3;
-  filter: none;
 }
 .gloss { pointer-events: none; }

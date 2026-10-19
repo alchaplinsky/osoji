@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { neutral } from "../../design/palette";
+import { THEMES } from "../../design/theme";
 import type { ViewNode } from "../../lib/api";
 import type { HoverId } from "../../lib/types";
 import { humanBytes, humanPercent } from "../../lib/format";
@@ -7,7 +8,7 @@ import { useElementSize } from "../../hooks/useElementSize";
 import { nodeFill, nodeName } from "../../screens/Breakdown/slices";
 import { cx } from "../ui";
 import CenterLabel from "../viz/CenterLabel";
-import { GlassDefs, glass, tint, usePaints } from "../viz/glass";
+import { GlassDefs, glass, glowOf, tint, usePaints } from "../viz/glass";
 import { pointerProps } from "../viz/interact";
 import type { Disk, VizProps } from "../viz/types";
 import { arcPath, geometry } from "./geometry";
@@ -33,6 +34,8 @@ export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp,
   const binned = useMemo(() => binnedKeys(view, binIds), [view, binIds]);
   const g = geometry(size.w, size.h);
   const hoverKey = hoveredKey(view, hoverId);
+  // Dark themes keep a soft halo on the inner ring; Light glows only on hover.
+  const dark = THEMES[theme].dark;
   const actions = { onHover, onDrill, onSelectFile, onContextMenu };
 
   return (
@@ -46,12 +49,13 @@ export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp,
             const d = arcPath(g, arc);
             if (!d) return null;
             const inBin = binned.has(arc.key);
+            const hovered = arc.key === hoverKey;
             const extra = arc.key === "hidden" || arc.key === "free";
             const color = arc.node ? nodeFill(arc.node, theme, arc.index, arc.count, arc.depth) : neutral(theme);
             return (
               <g
                 key={arc.key}
-                className={cx(styles.arc, arc.node && styles.node, arc.key === hoverKey && cx(styles.lifted, glass.hovered), inBin && glass.binned)}
+                className={cx(styles.arc, arc.node && styles.node, hovered && cx(styles.lifted, glass.hovered), inBin && glass.binned)}
                 style={{ opacity: relatedOpacity(related, arc.key) }}
                 {...pointerProps(arc.node, arc.hover, actions)}
               >
@@ -59,7 +63,7 @@ export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp,
                   <path d={d} className={styles[arc.key as "hidden" | "free"]} style={arc.key === "hidden" ? { fill: paint("hidden") } : undefined} />
                 ) : (
                   <>
-                    <path d={d} className={cx(glass.shape, arc.depth === 1 && glass.glow)} style={tint(color, inBin ? { fill: paint("binned") } : undefined)} />
+                    <path d={d} className={glass.shape} filter={inBin ? undefined : glowOf(paint, hovered, dark && arc.depth === 1)} style={tint(color, inBin ? { fill: paint("binned") } : undefined)} />
                     {!inBin && <path d={d} className={glass.gloss} style={{ fill: paint("gloss") }} />}
                   </>
                 )}
