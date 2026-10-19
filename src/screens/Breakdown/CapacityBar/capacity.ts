@@ -21,7 +21,7 @@ export function hiddenBytes(volume: Volume, root: ViewNode): number {
 
 /** Tooltip for the hidden segment; mentions the unreadable folder count when there is one. */
 export function hiddenNote(unreadable?: number): string {
-  const note = "Not in the scan: local snapshots, purgeable space, swap and folders Unshift could not read.";
+  const note = "Not in the scan: local snapshots, purgeable space, swap and folders Osoji could not read.";
   if (!unreadable || unreadable <= 0) return note;
   return `${note} ${humanCount(unreadable)} ${unreadable === 1 ? "folder" : "folders"} could not be read.`;
 }

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Unshift</title>
+    <title>Osoji</title>
     <!-- Apply the saved appearance before any CSS or React runs, so the first
          paint is already in the right theme instead of flashing the default
          and then transitioning. Mirrors the defaults in src/hooks/useTheme.tsx;
@@ -12,7 +12,7 @@
       (function () {
         var theme = "instrument", layout = "cards";
         try {
-          var s = JSON.parse(localStorage.getItem("unshift.appearance") || "{}");
+          var s = JSON.parse(localStorage.getItem("osoji.appearance") || "{}");
           if (s.theme === "instrument" || s.theme === "glass" || s.theme === "light") theme = s.theme;
           else if (matchMedia("(prefers-color-scheme: light)").matches) theme = "light";
           if (s.layout === "cards" || s.layout === "classic") layout = s.layout;

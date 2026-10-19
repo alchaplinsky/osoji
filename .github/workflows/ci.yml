@@ -54,9 +54,9 @@ jobs:
           workspaces: src-tauri
       - run: bun install --frozen-lockfile
       - name: Clippy
-        run: cargo clippy -p unshift-app -p scan-macos --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
+        run: cargo clippy -p osoji-app -p scan-macos --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
       - name: Rust tests
-        run: cargo test -p unshift-app -p scan-macos --manifest-path src-tauri/Cargo.toml
+        run: cargo test -p osoji-app -p scan-macos --manifest-path src-tauri/Cargo.toml
       - name: Build debug app
         run: cargo build --features webdriver --manifest-path src-tauri/Cargo.toml
       - name: E2E tests
