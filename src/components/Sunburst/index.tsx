@@ -10,8 +10,10 @@ import CenterLabel from "../viz/CenterLabel";
 import { GlassDefs, glass, tint, usePaints } from "../viz/glass";
 import { pointerProps } from "../viz/interact";
 import type { Disk, VizProps } from "../viz/types";
+import { useZoom } from "../viz/zoom";
 import { arcPath, geometry } from "./geometry";
 import { MAX_DEPTH, TAU, binnedKeys, layoutArcs, otherKey, relatedKeys, relatedOpacity, type Arc, type SliceKey } from "./layout";
+import { frame, zoomWorld, type Shown } from "./zoom";
 import styles from "./Sunburst.module.css";
 
 /** The arc a hover id points at: "other" means the view's own tail. */
@@ -30,18 +32,23 @@ export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp,
   const { id, paint } = usePaints();
   const arcs = useMemo(() => layoutArcs(view, disk), [view, disk]);
   const related = useMemo(() => relatedKeys(view, hoverId), [view, hoverId]);
-  const binned = useMemo(() => binnedKeys(view, binIds), [view, binIds]);
+  const zoom = useZoom(view, disk);
+  const { outer, inner, outerMeta } = zoom ?? {};
+  const binned = useMemo(() => binnedKeys(outer ?? view, binIds), [outer, view, binIds]);
+  // Built once per move; each frame only re-projects it.
+  const world = useMemo(() => (outer && inner ? zoomWorld(layoutArcs(outer, outerMeta), layoutArcs(inner), inner.id) : null), [outer, inner, outerMeta]);
+  const shown: Shown[] = zoom && world ? frame(world, zoom.p) : arcs.map((arc) => ({ arc, fade: 1 }));
   const g = geometry(size.w, size.h);
   const hoverKey = hoveredKey(view, hoverId);
   const actions = { onHover, onDrill, onSelectFile, onContextMenu };
 
   return (
-    <div ref={rootRef} className={cx(styles.root, className)}>
+    <div ref={rootRef} className={cx(styles.root, zoom && styles.zooming, className)}>
       {size.w > 0 && size.h > 0 && (
         <svg className={styles.svg} width={size.w} height={size.h}>
           <GlassDefs id={id} neutral={neutral(theme)} />
           <circle className={styles.lens} cx={g.cx} cy={g.cy} r={g.r0 + MAX_DEPTH * g.ring + 4} style={{ fill: paint("lens") }} />
-          {arcs.map((arc) => {
+          {shown.map(({ arc, fade }) => {
             const d = arcPath(g, arc);
             if (!d) return null;
             const inBin = binned.has(arc.key);
@@ -51,7 +58,7 @@ export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp,
               <g
                 key={arc.key}
                 className={cx(styles.arc, arc.node && styles.node, arc.key === hoverKey && cx(styles.lifted, glass.hovered), inBin && glass.binned)}
-                style={{ opacity: relatedOpacity(related, arc.key) }}
+                style={{ opacity: fade * relatedOpacity(related, arc.key) }}
                 {...pointerProps(arc.node, arc.hover, actions)}
               >
                 {extra ? (

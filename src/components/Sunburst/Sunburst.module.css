@@ -25,6 +25,13 @@
   transition: opacity .18s, transform .18s var(--ease-out);
 }
 .node { cursor: pointer; }
+
+/* While zooming every frame sets the geometry and fades itself: no transitions to lag behind, and no glow to repaint. */
+.zooming .arc,
+.zooming .arc path {
+  transition: none;
+  filter: none;
+}
 .lifted { transform: scale(1.025); }
 
 .hidden { stroke: var(--line); }

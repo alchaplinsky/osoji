@@ -8,13 +8,15 @@
 
 /* Glass segments with a gap between them; the ends of the bar are rounded more than the joins. */
 .bar {
-  display: flex;
+  position: relative;
   height: 84px;
-  gap: 4px;
 }
 
 .segment {
-  --piece-transition: width .6s var(--ease-out);
+  --piece-transition: left .6s var(--ease-out), width .6s var(--ease-out);
+  position: absolute;
+  top: 0;
+  bottom: 0;
   min-width: 3px;
   display: flex;
   align-items: flex-end;
@@ -23,10 +25,14 @@
   cursor: pointer;
   border-radius: 6px;
 }
-.segment:first-child { border-top-left-radius: 16px; border-bottom-left-radius: 16px; }
-.segment:last-child { border-top-right-radius: 16px; border-bottom-right-radius: 16px; }
+.first { border-top-left-radius: 16px; border-bottom-left-radius: 16px; }
+.last { border-top-right-radius: 16px; border-bottom-right-radius: 16px; }
 .rest { cursor: default; }
 .lifted { transform: scale(1.02); }
+
+/* While zooming every frame places and fades the segments itself, and segments sliding out are clipped at the ends. */
+.zooming { overflow: hidden; }
+.zooming .segment { transition: none; }
 
 .segmentLabel { min-width: 0; }
 

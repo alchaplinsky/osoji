@@ -18,6 +18,10 @@
 .file { cursor: grab; }
 .lifted { transform: scale(1.015); }
 
+/* While zooming every frame places and fades the tiles itself, and tiles sliding out are clipped at the edge. */
+.zooming { overflow: hidden; }
+.zooming .tile { transition: none; }
+
 /* Fixed line heights so the header's footprint matches HEAD in Tile.tsx, which places the children grid below it. */
 .name {
   font-size: 12.5px;

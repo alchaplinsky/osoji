@@ -14,10 +14,14 @@ const ARC_GAP = 2.5;
 const CORNER = 5;
 const MIN_SWEEP = 0.003;
 
-/** SVG path for an arc's ring segment, inset by the gaps and with rounded corners; null when too thin to draw. */
+/**
+ * SVG path for an arc's ring segment, inset by the gaps and with rounded corners; null when too thin to draw.
+ * Depth may be fractional while zooming, which can pull a ring into the hole.
+ */
 export function arcPath(g: Geometry, arc: Arc): string | null {
-  const r0 = g.r0 + (arc.depth - 1) * g.ring;
+  const r0 = Math.max(0, g.r0 + (arc.depth - 1) * g.ring);
   const r1 = g.r0 + arc.depth * g.ring - RING_GAP;
+  if (r1 - r0 < 1) return null;
   if (arc.a1 - arc.a0 >= TAU - 1e-9) return annulus(g, r0, r1);
   const gap = ARC_GAP / ((r0 + r1) / 2);
   const a0 = arc.a0 + gap / 2 - Math.PI / 2;
