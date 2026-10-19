@@ -60,7 +60,7 @@ export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp,
               />
             );
           })}
-          <circle className={styles.hole} cx={g.cx} cy={g.cy} r={g.r0 - 4} onClick={onUp} />
+          <circle className={styles.hole} cx={g.cx} cy={g.cy} r={g.r0 - g.gap} onClick={onUp} />
         </svg>
       )}
       <CenterLabel {...centerOf(view, disk, arcs, hoverId)} fontSize={centerSize} />
