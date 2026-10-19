@@ -118,6 +118,8 @@ struct Entry {
     mtime: i64,
     flags: Flags,
     top: u32,
+    dev: u32,
+    ino: u64,
     /// (dev, ino) of a regular file with nlink > 1, recorded once its id is known.
     link: Option<(u64, u64)>,
 }
@@ -423,6 +425,8 @@ fn process_dir(
                 mtime,
                 flags,
                 top,
+                dev: devid as u32,
+                ino: fileid,
                 link,
             });
             names.extend_from_slice(name);
@@ -440,7 +444,9 @@ fn process_dir(
         for e in entries.iter() {
             let off = e.name_off as usize;
             let name = &names[off..off + e.name_len as usize];
-            arena.push(task.id, name, e.size, e.mtime, e.flags);
+            let id = arena.push(task.id, name, e.size, e.mtime, e.flags) as usize;
+            arena.dev[id] = e.dev;
+            arena.ino[id] = e.ino;
         }
         first
     };
@@ -640,6 +646,17 @@ mod tests {
                 assert_eq!(&l, w, "{}", String::from_utf8_lossy(name));
             }
         }
+        let walked_ids: BTreeMap<Vec<u8>, (u32, u64)> = arena
+            .children(0)
+            .map(|id| (arena.name(id).to_vec(), (arena.dev[id as usize], arena.ino[id as usize])))
+            .collect();
+        // The arena keeps dev as u32, the listing as u64.
+        let listed_ids: BTreeMap<Vec<u8>, (u32, u64)> =
+            list_dir(&root).unwrap().into_iter().map(|e| (e.name, (e.dev as u32, e.ino))).collect();
+        assert_eq!(listed_ids, walked_ids);
+        assert!(walked_ids.values().all(|&(_, ino)| ino != 0));
+        assert_eq!(walked_ids[&b"big"[..]], walked_ids[&b"big-link"[..]]);
+
         assert!(listed[&b"big"[..]].0 >= 100_000);
         assert!(listed[&b"sub"[..]].2.contains(Flags::DIR));
         assert!(listed[&b"sym"[..]].2.contains(Flags::SYMLINK));
