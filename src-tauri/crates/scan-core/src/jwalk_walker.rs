@@ -110,6 +110,8 @@ pub fn walk(cfg: &ScanConfig, progress: &Progress, cancel: &Cancel, links: &Hard
 
         let name: &[u8] = if depth == 0 { cfg.root.as_os_str().as_bytes() } else { entry.file_name().as_bytes() };
         let id = arena.push(parent, name, size, meta.mtime, flags);
+        arena.dev[id as usize] = meta.dev as u32;
+        arena.ino[id as usize] = meta.ino;
         if linked {
             links.record(meta.dev, meta.ino, id, !flags.contains(Flags::HARDLINK_DUP));
         }
