@@ -1,13 +1,14 @@
 import { useMemo } from "react";
 import { useElementSize } from "../../../hooks/useElementSize";
 import { humanPercent } from "../../../lib/format";
+import type { HoverId } from "../../../lib/types";
 import { visibleSlices } from "../../../screens/Breakdown/slices";
 import { neutral } from "../../../design/palette";
 import { THEMES } from "../../../design/theme";
 import { binnedKeys, relatedKeys, relatedOpacity } from "../../Sunburst/layout";
 import { cx } from "../../ui";
 import CenterLabel from "../CenterLabel";
-import { GlassDefs, glass, glowOf, tint, usePaints } from "../glass";
+import { GlassDefs, glass, tint, useLingering, usePaints } from "../glass";
 import { pointerProps } from "../interact";
 import type { VizProps } from "../types";
 import MoonLabels from "./MoonLabels";
@@ -24,6 +25,7 @@ export default function Orbit({ view, theme, hoverId, onHover, onDrill, onUp, on
   const moons = useMemo(() => placeMoons(slices, view.size, geometry), [slices, view.size, geometry]);
   const { cx: x0, cy: y0, R } = geometry;
   const paused = hoverId !== null;
+  const glowing = useLingering<HoverId>(hoverId);
   const hovered = paused ? slices.find((s) => s.hover === hoverId) : undefined;
 
   return (
@@ -46,7 +48,15 @@ export default function Orbit({ view, theme, hoverId, onHover, onDrill, onUp, on
                     style={{ opacity: relatedOpacity(related, slice.key) }}
                     {...pointerProps(slice.node, slice.hover, { onHover, onDrill, onSelectFile, onContextMenu })}
                   >
-                    <circle className={glass.shape} filter={inBin ? undefined : glowOf(paint, hovered, THEMES[theme].dark)} cx={x} cy={y} r={r} style={tint(slice.fill, inBin ? { fill: paint("binned") } : undefined)} />
+                    {!inBin && glowing.includes(slice.hover) && <circle className={glass.halo} filter={paint("glow")} cx={x} cy={y} r={r} style={tint(slice.fill)} />}
+                    <circle
+                      className={glass.shape}
+                      filter={!inBin && THEMES[theme].dark ? paint("halo") : undefined}
+                      cx={x}
+                      cy={y}
+                      r={r}
+                      style={tint(slice.fill, inBin ? { fill: paint("binned") } : undefined)}
+                    />
                     {!inBin && <circle className={glass.gloss} cx={x} cy={y} r={r} style={{ fill: paint("gloss") }} />}
                   </g>
                 );

@@ -112,6 +112,7 @@
 
 .insideSegment {
   --piece-transition: width .6s var(--ease-out);
+  position: relative;
   min-width: 3px;
   display: flex;
   align-items: center;

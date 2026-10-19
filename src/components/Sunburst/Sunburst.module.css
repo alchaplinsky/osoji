@@ -22,7 +22,7 @@
   fill-rule: evenodd;
   transform-box: view-box;
   transform-origin: 50% 50%;
-  transition: opacity .18s, transform .18s var(--ease-out);
+  transition: opacity .25s, transform .32s var(--ease-glide);
 }
 .node { cursor: pointer; }
 
@@ -40,7 +40,7 @@
   fill: color-mix(in srgb, var(--fg) 4%, transparent);
   stroke: var(--line2);
   stroke-dasharray: 3 4;
-  transition: fill .18s, stroke .18s;
+  transition: fill .32s var(--ease-glide), stroke .32s var(--ease-glide);
 }
 .lifted .free {
   fill: color-mix(in srgb, var(--fg) 7%, transparent);
