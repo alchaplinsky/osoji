@@ -40,7 +40,7 @@ export default function WatchersScreen({
       </Toolbar>
       <div className={styles.body}>
         <div className={styles.intro}>
-          Unshift keeps an eye on these folders and checks them against your latest scan. A nudge when one grows past
+          Osoji keeps an eye on these folders and checks them against your latest scan. A nudge when one grows past
           its limit comes once background watching lands.
         </div>
         {statuses.length === 0 && (

@@ -47,7 +47,7 @@ export default function ReviewSheet({ open, items, volumeName, busy, progress, e
         <>
           <div className={styles.modes}>
             <ModeOption label="Move to Trash" hint="You can put items back later" selected />
-            <ModeOption label="Delete permanently" hint="Not available yet" disabled title="Unshift never deletes permanently" />
+            <ModeOption label="Delete permanently" hint="Not available yet" disabled title="Osoji never deletes permanently" />
           </div>
           {busy && progress && (
             <div>

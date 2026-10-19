@@ -1,6 +1,6 @@
-# Releasing Unshift
+# Releasing Osoji
 
-Unshift ships as a signed + notarized **universal** macOS app, distributed via
+Osoji ships as a signed + notarized **universal** macOS app, distributed via
 public GitHub Releases, with an in-app auto-updater. This doc covers the
 one-time setup and the per-release procedure.
 
@@ -16,7 +16,7 @@ bump version → run Release workflow (manual) → CI builds/signs/notarizes
 - **Sign:** Developer ID Application cert.
 - **Notarize + staple:** handled automatically by `tauri-apps/tauri-action`.
 - **Update artifacts:** `createUpdaterArtifacts: true` emits `<app>.app.tar.gz`
-  and a `.sig` signed with the Unshift minisign key.
+  and a `.sig` signed with the Osoji minisign key.
 - **Endpoint:** the repo is public, so the app reads the manifest straight from
   GitHub — `https://github.com/alchaplinsky/unshift/releases/latest/download/latest.json`
   (`plugins.updater.endpoints` in `src-tauri/tauri.conf.json`). No proxy needed.
@@ -67,12 +67,12 @@ the same developer account, copy them over.
    - `package.json` → `version`
 2. Merge that to `main`.
 3. Run the **Release** workflow: GitHub → Actions → *Release* → *Run workflow*.
-4. Wait for it to finish. It creates a **published** release `Unshift v<version>`
+4. Wait for it to finish. It creates a **published** release `Osoji v<version>`
    with the `.dmg`, `.app.tar.gz`, `.app.tar.gz.sig`, and `latest.json`, and
    fills the body with auto-generated release notes (shown in the update toast).
 
 Installed apps pick the new version up on their next launch (or via
-*Unshift → Check for Updates…*).
+*Osoji → Check for Updates…*).
 
 ## Local signed build
 
@@ -98,7 +98,7 @@ has been found, but no private key". Dev builds (`bun tauri dev`) are unaffected
   "Update ready" toast (bottom-right) then offers *Restart now* / *Skip for now*.
   A skipped update still applies on the next launch. Any failure (offline,
   GitHub down) is logged and swallowed so it never blocks startup.
-- **On demand** — *Unshift → Check for Updates…* in the app menu. Reports every
+- **On demand** — *Osoji → Check for Updates…* in the app menu. Reports every
   outcome as a toast: checking → up to date / download progress → update ready /
   check failed.
 

@@ -50,7 +50,7 @@ function titleFor(status: ScanStatus, rootLabel: string) {
 function subFor(status: ScanStatus, summary: ScanSummary | null, error: string | null) {
   switch (status) {
     case "scanning":
-      return "Unshift is reading every folder. Nothing is removed during a scan.";
+      return "Osoji is reading every folder. Nothing is removed during a scan.";
     case "done": {
       const tail = "If you have moved files around, a fresh scan takes about a minute.";
       if (!summary) return tail;

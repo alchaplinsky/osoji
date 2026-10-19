@@ -3,7 +3,7 @@ import { humanBytes } from "../../lib/format";
 import { Mono } from "../ui";
 import styles from "./TrashLine.module.css";
 
-/** What already sits in the Trash. Unshift never empties it; Finder does. */
+/** What already sits in the Trash. Osoji never empties it; Finder does. */
 export default function TrashLine({ trash }: { trash: TrashInfo }) {
   return (
     <div className={styles.line}>
