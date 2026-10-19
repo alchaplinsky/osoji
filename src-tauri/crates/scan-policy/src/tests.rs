@@ -163,34 +163,45 @@ fn finds_nodes_by_path() {
 }
 
 #[test]
+fn finds_the_live_node_when_a_name_came_back() {
+    let mut f = fixture();
+    let old = f.id("/Users/alex/proj");
+    f.arena.mark_removed(old);
+    let new = f.arena.insert(f.id(HOME), b"proj", 0, NOW, Flags::DIR);
+    let index = ChildIndex::build(&f.arena);
+    assert_eq!(find_node(&f.arena, &index, Path::new("/Users/alex/proj")), new);
+    assert_eq!(find_node(&f.arena, &index, Path::new("/Users/alex/proj/target")), NONE);
+}
+
+#[test]
 fn matches_each_field() {
     assert_eq!(matched("path = \"~/proj\""), ["/Users/alex/proj"]);
     assert_eq!(matched("parent = \"~/proj\""), ["/Users/alex/proj/Cargo.toml", "/Users/alex/proj/target"]);
-    assert_eq!(matched("under = \"/Applications\", dir = true"), [
-        "/Applications/Safari.app",
-        "/Applications/Utilities",
-        "/Applications/Utilities/Terminal.app"
-    ]);
+    assert_eq!(
+        matched("under = \"/Applications\", dir = true"),
+        ["/Applications/Safari.app", "/Applications/Utilities", "/Applications/Utilities/Terminal.app"]
+    );
     assert_eq!(matched("name = \".Trash\""), ["/Users/alex/.Trash", "/Users/alex/Documents/.Trash"]);
-    assert_eq!(matched("suffix = \".app\""), [
-        "/Applications/Safari.app",
-        "/Applications/Utilities/Terminal.app",
-        "/Applications/readme.app"
-    ]);
+    assert_eq!(
+        matched("suffix = \".app\""),
+        ["/Applications/Safari.app", "/Applications/Utilities/Terminal.app", "/Applications/readme.app"]
+    );
     assert_eq!(matched("suffix = \".app\", dir = false"), ["/Applications/readme.app"]);
-    assert_eq!(matched("parent = \"/Applications\", not_named = [\"Utilities\", \"readme.app\"]"), ["/Applications/Safari.app"]);
+    assert_eq!(
+        matched("parent = \"/Applications\", not_named = [\"Utilities\", \"readme.app\"]"),
+        ["/Applications/Safari.app"]
+    );
     assert_eq!(matched("prefix = \".\""), ["/Users/alex/.Trash", "/Users/alex/Documents/.Trash"]);
     assert_eq!(matched("parent = \"/Users\", not_path = [\"~\", \"/Users/missing\"]"), Vec::<String>::new());
-    assert_eq!(matched("parent = \"~\", dir = true, not_path = [\"~/Library\", \"~/Documents\", \"~/proj\", \"~/other\"]"), [
-        "/Users/alex/.Trash",
-        "/Users/alex/Photos.photoslibrary"
-    ]);
+    assert_eq!(
+        matched("parent = \"~\", dir = true, not_path = [\"~/Library\", \"~/Documents\", \"~/proj\", \"~/other\"]"),
+        ["/Users/alex/.Trash", "/Users/alex/Photos.photoslibrary"]
+    );
     assert_eq!(matched("name = \"target\", sibling = \"Cargo.toml\""), ["/Users/alex/proj/target"]);
-    assert_eq!(matched("parent = \"~/Documents\", min_bytes = 900"), [
-        "/Users/alex/Documents/new.bin",
-        "/Users/alex/Documents/old.bin",
-        "/Users/alex/Documents/undated.bin"
-    ]);
+    assert_eq!(
+        matched("parent = \"~/Documents\", min_bytes = 900"),
+        ["/Users/alex/Documents/new.bin", "/Users/alex/Documents/old.bin", "/Users/alex/Documents/undated.bin"]
+    );
     assert_eq!(matched("parent = \"~/Documents\", older_than_days = 180"), ["/Users/alex/Documents/old.bin"]);
 }
 
@@ -211,7 +222,15 @@ fn stamps_flags_and_records_the_strongest_rule() {
     let flags = |p: &str| f.arena.flags[f.id(p) as usize];
     let rule_id = |p: &str| hits.rule(f.id(p)).map(|i| policy.rule(i).id.as_str());
 
-    for p in ["/System", "/Applications", "/Users", HOME, "/Users/alex/Library", "/Users/alex/Library/Application Support", "/Users/alex/.Trash"] {
+    for p in [
+        "/System",
+        "/Applications",
+        "/Users",
+        HOME,
+        "/Users/alex/Library",
+        "/Users/alex/Library/Application Support",
+        "/Users/alex/.Trash",
+    ] {
         assert!(flags(p).contains(Flags::PROTECTED), "{p}");
         assert!(!flags(p).contains(Flags::RISKY), "{p}");
     }
@@ -231,6 +250,59 @@ fn stamps_flags_and_records_the_strongest_rule() {
     assert!(docs.contains(Flags::PROTECTED | Flags::RISKY));
     assert_eq!(rule_id("/Users/alex/Documents"), Some("docs-protected"));
     assert_eq!(f.arena.count_flag(Flags::UNEXPECTED), 0);
+}
+
+#[test]
+fn stamps_nodes_appended_since_the_last_stamp() {
+    let mut f = fixture();
+    let src = r#"
+        version = 1
+        [[rule]]
+        id = "system"
+        kind = "protected"
+        reason = "x"
+        match = { path = "/System" }
+        [[rule]]
+        id = "apps"
+        kind = "risky"
+        reason = "x"
+        match = { suffix = ".app" }
+        [[rule]]
+        id = "app-dirs"
+        kind = "unexpected"
+        reason = "x"
+        match = { parent = "/Applications", dir = true }
+    "#;
+    let policy = Policy::from_toml(src).unwrap();
+    let mut hits = policy.resolve(&f.arena, &f.index, &ctx()).stamp(&mut f.arena);
+
+    let from = f.arena.len() as NodeId;
+    let old_system = f.id("/System");
+    f.arena.mark_removed(old_system);
+    let system = f.arena.insert(0, b"System", 0, NOW, Flags::DIR);
+    let app = f.arena.insert(f.id("/Applications"), b"New.app", 0, NOW, Flags::DIR);
+    // Cleared so a sweep over old ids would show: only the pinned rules may touch them.
+    let (safari, readme) = (f.id("/Applications/Safari.app"), f.id("/Applications/readme.app"));
+    f.arena.flags[safari as usize] = Flags::DIR;
+    f.arena.flags[readme as usize] = Flags::empty();
+
+    let index = ChildIndex::build(&f.arena);
+    let new = policy.resolve(&f.arena, &index, &ctx()).stamp_from(&mut f.arena, from);
+    let rule_id = |h: &PolicyHits, id| h.rule(id).map(|i| policy.rule(i).id.as_str());
+
+    assert_eq!(f.arena.flags[system as usize], Flags::DIR | Flags::PROTECTED);
+    assert_eq!(rule_id(&new, system), Some("system"));
+    assert_eq!(new.rule(old_system), None);
+    assert_eq!(f.arena.flags[app as usize], Flags::DIR | Flags::RISKY | Flags::UNEXPECTED);
+    assert_eq!(rule_id(&new, app), Some("apps"));
+    assert_eq!(f.arena.flags[safari as usize], Flags::DIR | Flags::UNEXPECTED);
+    assert_eq!(rule_id(&new, safari), Some("app-dirs"));
+    assert_eq!(f.arena.flags[readme as usize], Flags::empty());
+    assert_eq!(new.rule(readme), None);
+
+    hits.extend(new);
+    assert_eq!(rule_id(&hits, system), Some("system"));
+    assert_eq!(rule_id(&hits, safari), Some("apps"));
 }
 
 #[test]
@@ -300,18 +372,26 @@ fn keeps_only_the_outermost_cleanup_matches() {
         p
     };
     let utilities = f.id("/Applications/Utilities");
-    assert_eq!(paths(covering(&f.arena, all, |id| id == utilities)), [
-        "/Applications/Safari.app",
-        "/Applications/Utilities",
-        "/Applications/readme.app",
-        "/Users/alex/.Trash",
-        "/Users/alex/Documents",
-        "/Users/alex/Photos.photoslibrary",
-        "/Users/alex/other",
-        "/Users/alex/proj",
-    ]);
+    assert_eq!(
+        paths(covering(&f.arena, all, |id| id == utilities)),
+        [
+            "/Applications/Safari.app",
+            "/Applications/Utilities",
+            "/Applications/readme.app",
+            "/Users/alex/.Trash",
+            "/Users/alex/Documents",
+            "/Users/alex/Photos.photoslibrary",
+            "/Users/alex/other",
+            "/Users/alex/proj",
+        ]
+    );
 
-    let only_targets = policy.resolve(&f.arena, &f.index, &ctx()).cleanup_matches(&f.arena).into_iter().filter(|&(_, r)| r == 1).collect();
+    let only_targets = policy
+        .resolve(&f.arena, &f.index, &ctx())
+        .cleanup_matches(&f.arena)
+        .into_iter()
+        .filter(|&(_, r)| r == 1)
+        .collect();
     let proj = f.id("/Users/alex/proj");
     assert_eq!(paths(covering(&f.arena, only_targets, |id| id == proj)), ["/Users/alex/other/target"]);
 }

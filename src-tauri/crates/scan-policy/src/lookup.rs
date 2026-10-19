@@ -1,4 +1,4 @@
-use scan_core::{Arena, ChildIndex, NodeId, NONE};
+use scan_core::{Arena, ChildIndex, Flags, NodeId, NONE};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
@@ -27,7 +27,9 @@ pub fn find_node(arena: &Arena, index: &ChildIndex, path: &Path) -> NodeId {
     let mut id: NodeId = 0;
     for part in rest.components() {
         let name = part.as_os_str().as_bytes();
-        match index.children(id).iter().find(|&&c| arena.name(c) == name) {
+        // Skip trashed and removed children: a name that came back on disk is a different, live node.
+        let live = |c: NodeId| !arena.flags[c as usize].intersects(Flags::TRASHED | Flags::REMOVED);
+        match index.children(id).iter().find(|&&c| live(c) && arena.name(c) == name) {
             Some(&c) => id = c,
             None => return NONE,
         }
