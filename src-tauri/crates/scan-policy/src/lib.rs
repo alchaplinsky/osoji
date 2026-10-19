@@ -8,7 +8,7 @@ mod reason;
 mod schema;
 
 pub use lookup::{expand, find_node};
-pub use matcher::{covering, PolicyContext, PolicyHits, Resolved};
+pub use matcher::{covering, PolicyContext, PolicyHits, Resolved, POLICY_FLAGS};
 pub use schema::{Kind, Match, PolicyError, Rule, Safety, SUPPORTED_VERSION};
 
 use scan_core::{Arena, ChildIndex, NodeId};

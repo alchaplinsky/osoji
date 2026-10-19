@@ -7,9 +7,10 @@
 //!
 //! Hard links keep the scan's invariant: for every inode with links inside the scan, exactly one
 //! live node carries the bytes and the others are `HARDLINK_DUP` at size 0. `Hardlinks` records
-//! which node that is. When it leaves, the first live link takes over its size; a new link to a
-//! carried inode comes in as a dup. The arena's `dev`/`ino` columns find the carrier of an inode
-//! the registry never saw, a file that had a single link at scan time.
+//! which node that is. When it leaves through `detach` (sweeps included), the first live link
+//! takes over its size; a new link to a carried inode comes in as a dup. The arena's `dev`/`ino`
+//! columns find the carrier of an inode the registry never saw, a file that had a single link at
+//! scan time.
 
 use crate::{Arena, ChildIndex, Flags, NodeId, NONE};
 use std::collections::{HashMap, HashSet};
@@ -93,7 +94,8 @@ impl Hardlinks {
         Some((key, counted))
     }
 
-    /// The counted member, if it still counts: the app trashes nodes without telling the registry.
+    /// The counted member, if it still counts: a node detached straight through the arena leaves
+    /// the registry stale.
     fn carrier(&self, arena: &Arena, key: (u64, u64)) -> Option<NodeId> {
         self.counted(key.0, key.1).filter(|&n| !is_gone(arena, n))
     }
@@ -176,24 +178,46 @@ fn relinked(arena: &Arena, links: &Hardlinks, c: NodeId, e: &DirEntry) -> bool {
     linked && arena.ino[i] != 0 && e.ino != 0 && (arena.dev[i], arena.ino[i]) != short((e.dev, e.ino))
 }
 
-/// Mark `c` removed and hand each inode it or its subtree carried to the first live link left.
-fn remove(arena: &mut Arena, index: &ChildIndex, links: &mut Hardlinks, c: NodeId) {
-    // Detaching zeroes the node's own size; its descendants keep theirs.
-    let size = arena.size[c as usize];
-    arena.mark_removed(c);
-    if links.is_empty() {
-        return;
+/// How a node left the tree: the user trashed it, or it vanished from disk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Detached {
+    Trashed,
+    Removed,
+}
+
+/// `Arena::mark_trashed` / `mark_removed` that keeps one carrier per inode: every link `id` or
+/// its subtree carried hands its bytes to the first live link left outside, and leaves the
+/// registry. `index` must hold the subtree. Returns the bytes the tree lost, so a counted link
+/// whose inode lives on elsewhere frees nothing. A node already gone, or under a gone ancestor,
+/// returns 0.
+pub fn detach(arena: &mut Arena, index: &ChildIndex, links: &mut Hardlinks, id: NodeId, how: Detached) -> u64 {
+    if is_gone(arena, id) {
+        return 0;
     }
-    let mut stack = vec![c];
+    // Detaching zeroes the node's own size; its descendants keep theirs.
+    let size = arena.size[id as usize];
+    let lost = match how {
+        Detached::Trashed => arena.mark_trashed(id),
+        Detached::Removed => arena.mark_removed(id),
+    };
+    if links.is_empty() {
+        return lost;
+    }
+    let mut handed = 0;
+    let mut stack = vec![id];
     while let Some(n) = stack.pop() {
-        stack.extend_from_slice(index.children(n));
+        // A child detached earlier already handed its links on.
+        stack.extend(index.children(n).iter().filter(|&&c| !arena.flags[c as usize].intersects(GONE)));
         let Some((key, true)) = links.forget(n) else { continue };
         let Some(&heir) = links.members(key.0, key.1).iter().find(|&&m| !is_gone(arena, m)) else { continue };
         let i = heir as usize;
+        let bytes = if n == id { size } else { arena.size[n as usize] };
         arena.flags[i].remove(Flags::HARDLINK_DUP);
-        arena.set_size(heir, if n == c { size } else { arena.size[n as usize] }, arena.mtime[i]);
+        arena.set_size(heir, bytes, arena.mtime[i]);
         links.promote(key, heir);
+        handed += bytes;
     }
+    lost.saturating_sub(handed)
 }
 
 /// Bring `dir`'s direct children in line with `listing`, matching by name. Children
@@ -228,7 +252,7 @@ pub fn reconcile(
             .get(arena.name(c))
             .filter(|e| e.flags.contains(Flags::DIR) == is_dir && !relinked(arena, links, c, e));
         let Some(e) = entry else {
-            remove(arena, index, links, c);
+            detach(arena, index, links, c, Detached::Removed);
             out.removed.push(c);
             continue;
         };
@@ -648,6 +672,44 @@ mod tests {
         let list = listing(&arena, &index, 0);
         reconcile(&mut arena, &index, &mut links, 0, &list);
         assert_matches(&arena, &[("a/", 64), ("a/y", 200), ("a/sub/", 64), ("a/sub/z", LINK), ("b", LINK)]);
+        assert_eq!(carrier(&arena, &links, 7), node(&arena, "b"));
+    }
+
+    #[test]
+    fn trashing_the_counted_link_promotes_the_survivor() {
+        let (mut arena, index, mut links) = linked_setup(&[("a/x", 7), ("b", 7)]);
+        let (total, x) = (arena.size[0], node(&arena, "a/x"));
+        assert_eq!(detach(&mut arena, &index, &mut links, x, Detached::Trashed), 0);
+        assert!(arena.flags[x as usize].contains(Flags::TRASHED));
+        assert_eq!(arena.size[0], total);
+        assert_matches(&arena, &[("a/", 64), ("a/y", 200), ("a/sub/", 64), ("a/sub/z", LINK), ("b", LINK)]);
+        assert_eq!(carrier(&arena, &links, 7), node(&arena, "b"));
+        assert_eq!(links.members(1, 7), [node(&arena, "b")]);
+    }
+
+    #[test]
+    fn trashing_a_directory_hands_its_links_to_a_survivor_outside() {
+        // `a/x` counts; `a/sub/z` is a dup inside the same tree, so only `b` may take over.
+        let (mut arena, index, mut links) = linked_setup(&[("a/x", 7), ("a/sub/z", 7), ("b", 7)]);
+        let (total, a, b) = (arena.size[0], node(&arena, "a"), node(&arena, "b"));
+        let lost = detach(&mut arena, &index, &mut links, a, Detached::Trashed);
+        assert_eq!(lost, 64 + 200 + 64);
+        assert_eq!(arena.size[0], total - lost);
+        assert_matches(&arena, &[("b", LINK)]);
+        assert_eq!(carrier(&arena, &links, 7), b);
+        assert_eq!(links.members(1, 7), [b]);
+    }
+
+    #[test]
+    fn detaching_twice_is_a_no_op() {
+        let (mut arena, index, mut links) = linked_setup(&[("a/x", 7), ("b", 7)]);
+        let (a, x) = (node(&arena, "a"), node(&arena, "a/x"));
+        detach(&mut arena, &index, &mut links, a, Detached::Trashed);
+        let after = dump(&arena);
+        assert_eq!(detach(&mut arena, &index, &mut links, a, Detached::Removed), 0);
+        assert_eq!(detach(&mut arena, &index, &mut links, x, Detached::Trashed), 0);
+        assert_eq!(dump(&arena), after);
+        assert!(!arena.flags[a as usize].contains(Flags::REMOVED));
         assert_eq!(carrier(&arena, &links, 7), node(&arena, "b"));
     }
 
