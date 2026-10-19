@@ -2,7 +2,9 @@
 //!
 //! A batch is applied in phases, and the `scan` lock is never held across I/O: resolve paths to
 //! ids (locked), list and walk (unlocked), reconcile and graft rescans (locked), walk new
-//! directories (unlocked), graft them and match what was added against the policy (locked).
+//! directories (unlocked), graft them and match every node the batch touched against the policy
+//! again (locked). Touched means added, resized, or an ancestor of a directory whose contents
+//! changed: size and age rules test a directory's total, and those are the totals that moved.
 //!
 //! Two counters guard what was read before the lock was dropped. `generation` moves when a
 //! finished scan replaces the arena: the ids mean nothing in the new one, and that scan's walk saw
@@ -21,7 +23,7 @@
 //! result is in place. Applies hold `AppState.applying` throughout, so the watcher threads (two
 //! while a new scan replaces the old) and the drain never interleave phases.
 
-use crate::{find_node, home_path, unix_now, AppState, Scan};
+use crate::{ancestors_of, find_node, home_path, unix_now, AppState, Scan};
 use scan_core::live::{graft, is_gone, reconcile, DirEntry, Hardlinks};
 use scan_core::{Arena, Cancel, ChildIndex, Flags, HardlinkSet, NodeId, Progress, ScanConfig, NONE};
 use scan_macos::{Batch, Watcher};
@@ -177,7 +179,7 @@ impl Snapshot {
         let Some(first) = first else {
             return Ok(());
         };
-        let (first_new, mut changed, new_dirs) = first?;
+        let Update { first_new, mut changed, mut touched, new_dirs } = first?;
         if changed.is_empty() {
             return Ok(());
         }
@@ -195,11 +197,10 @@ impl Snapshot {
             scan.epoch += 1;
             // Inserts and grafts are not in the index, and every change reorders its ancestors' children.
             scan.index = ChildIndex::build(&scan.arena);
-            // The policy resolves against the rebuilt index, so a pinned path that came back matches its new node.
-            if scan.arena.len() > first_new as usize {
-                let hits = state.policy.resolve(&scan.arena, &scan.index, &ctx).stamp_from(&mut scan.arena, first_new);
-                scan.hits.extend(hits);
-            }
+            // Grafted-into directories descend from reconciled ones, whose chains are in `touched`.
+            touched.extend(first_new..scan.arena.len() as NodeId);
+            // Against the rebuilt index, so a pinned path that came back matches its new node.
+            scan.restamp(&state.policy, &ctx, touched);
         });
         if applied.is_some() {
             changed.sort_unstable();
@@ -217,12 +218,23 @@ fn locked<R>(state: &AppState, generation: u64, f: impl FnOnce(&mut Scan) -> R) 
     (state.generation.load(Ordering::Acquire) == generation).then(|| f(scan))
 }
 
-/// Reconcile each listing and replace each rescanned subtree. Returns the first id this added
-/// (the arena's length before), the directories that changed, and the new directories still to
-/// walk, with their paths.
-fn update(scan: &mut Scan, reads: Reads) -> (NodeId, Vec<NodeId>, Vec<(NodeId, PathBuf)>) {
+/// What the first locked phase did.
+struct Update {
+    /// The arena's length before: every id from here on was added.
+    first_new: NodeId,
+    /// Directories whose contents changed.
+    changed: Vec<NodeId>,
+    /// Existing nodes whose size or total moved, for the policy to match again.
+    touched: Vec<NodeId>,
+    /// New directories still to walk, with their paths.
+    new_dirs: Vec<(NodeId, PathBuf)>,
+}
+
+/// Reconcile each listing and replace each rescanned subtree.
+fn update(scan: &mut Scan, reads: Reads) -> Update {
     let first_new = scan.arena.len() as NodeId;
     let mut changed = Vec::new();
+    let mut touched = Vec::new();
     let mut new_dirs = Vec::new();
     for (dir, listing) in reads.listings {
         let Read::Found(listing) = listing else {
@@ -234,6 +246,7 @@ fn update(scan: &mut Scan, reads: Reads) -> (NodeId, Vec<NodeId>, Vec<(NodeId, P
             continue;
         }
         changed.push(dir);
+        touched.extend(r.changed);
         // The walker never descends into mount points or directories it cannot read either.
         let walkable =
             r.new_dirs.into_iter().filter(|&id| !scan.arena.flags[id as usize].intersects(Flags::MOUNT | Flags::ERROR));
@@ -256,7 +269,11 @@ fn update(scan: &mut Scan, reads: Reads) -> (NodeId, Vec<NodeId>, Vec<(NodeId, P
     if !changed.is_empty() {
         scan.epoch += 1;
     }
-    (first_new, changed, new_dirs)
+    for &dir in &changed {
+        touched.push(dir);
+        touched.extend(ancestors_of(&scan.arena, dir));
+    }
+    Update { first_new, changed, touched, new_dirs }
 }
 
 /// `dir` is no longer on disk: detach it, or for the root (the scan's anchor) everything under
@@ -560,7 +577,7 @@ mod tests {
             let mut guard = state.scan.lock().unwrap();
             let scan = guard.as_mut().unwrap();
             let size = scan.arena.size[x_id as usize];
-            finish_sweep(Some(&mut *scan), vec![(x_id, size, Ok(()))], Vec::new());
+            finish_sweep(&state.policy, Some(&mut *scan), vec![(x_id, size, Ok(()))], Vec::new());
             scan.arena.len()
         };
         assert!(snapshot.commit(&state, reads, |_| unreachable!("stale listing applied")).is_err());
@@ -699,6 +716,140 @@ mod tests {
         apply(&state, dirs(&[&a]));
         assert_eq!(with_scan(&state, |scan| totals(&scan.arena)), fresh());
         assert!(!dup(&a.join("sub/x2")));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Sweep `path` as `sweep` does once the move succeeded, with the size planned before it.
+    fn sweep(state: &AppState, path: &Path) -> crate::TrashResult {
+        let id = id_of(state, path);
+        let mut guard = state.scan.lock().unwrap();
+        let scan = guard.as_mut().unwrap();
+        let size = scan.arena.size[id as usize];
+        finish_sweep(&state.policy, Some(scan), vec![(id, size, Ok(()))], Vec::new())
+    }
+
+    #[test]
+    fn sweeping_the_counted_link_hands_its_bytes_to_the_survivor() {
+        let root = temp_root("sweep-link");
+        fs::hard_link(root.join("a/x"), root.join("a/sub/x2")).unwrap();
+        let state = state_for(&root);
+        let flags = |path: &Path| {
+            let id = id_of(&state, path);
+            with_scan(&state, |scan| scan.arena.flags[id as usize])
+        };
+        // The walker picks whichever link it reaches first.
+        let (counted, survivor) = if flags(&root.join("a/x")).contains(Flags::HARDLINK_DUP) {
+            (root.join("a/sub/x2"), root.join("a/x"))
+        } else {
+            (root.join("a/x"), root.join("a/sub/x2"))
+        };
+        let total = with_scan(&state, |scan| scan.arena.size[0]);
+
+        fs::remove_file(&counted).unwrap();
+        let result = sweep(&state, &counted);
+        assert_eq!(result.bytes, 0, "emptying the Trash frees nothing while a link survives");
+        assert_eq!(with_scan(&state, |scan| scan.arena.size[0]), total);
+        assert!(!flags(&survivor).contains(Flags::HARDLINK_DUP));
+        assert_fresh(&state, &root);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_sweep_a_live_update_saw_first_counts_the_planned_size() {
+        let root = temp_root("sweep-seen");
+        let state = state_for(&root);
+        let x = root.join("a/x");
+        let x_id = id_of(&state, &x);
+        let size = with_scan(&state, |scan| scan.arena.size[x_id as usize]);
+
+        // The move lands, and the watcher reports it before the sweep re-locks.
+        fs::remove_file(&x).unwrap();
+        apply(&state, dirs(&[&root.join("a")]));
+        let total = with_scan(&state, |scan| scan.arena.size[0]);
+        let result = {
+            let mut guard = state.scan.lock().unwrap();
+            finish_sweep(&state.policy, guard.as_mut(), vec![(x_id, size, Ok(()))], Vec::new())
+        };
+        assert_eq!(result.bytes, size);
+        assert_eq!(with_scan(&state, |scan| scan.arena.size[0]), total, "not taken off the parents twice");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_directory_total_crossing_a_size_rule_is_matched_again() {
+        let root = temp_root("policy-size");
+        let policy = Policy::from_toml(
+            r#"
+            version = 1
+            [[rule]]
+            id = "big"
+            kind = "unexpected"
+            reason = "Grew."
+            match = { name = "sub", dir = true, min_bytes = 50000 }
+            "#,
+        )
+        .unwrap();
+        let state = state_with(&root, policy);
+        let sub = root.join("a/sub");
+        let sub_id = id_of(&state, &sub);
+        let hit = || {
+            with_scan(&state, |scan| {
+                (scan.arena.flags[sub_id as usize].contains(Flags::UNEXPECTED), scan.hits.rule(sub_id))
+            })
+        };
+        assert_eq!(hit(), (false, None));
+
+        write(&sub.join("z"), 100_000);
+        apply(&state, dirs(&[&sub]));
+        assert_eq!(hit(), (true, Some(0)));
+
+        write(&sub.join("z"), 8_192);
+        apply(&state, dirs(&[&sub]));
+        assert_eq!(hit(), (false, None));
+
+        // A sweep moves the total too.
+        write(&sub.join("z"), 100_000);
+        apply(&state, dirs(&[&sub]));
+        assert_eq!(hit(), (true, Some(0)));
+        fs::remove_file(sub.join("z")).unwrap();
+        sweep(&state, &sub.join("z"));
+        assert_eq!(hit(), (false, None));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_recreated_trash_folder_replaces_the_old_one() {
+        let root = temp_root("trash-recreated");
+        let trash = root.join(".Trash");
+        fs::create_dir_all(&trash).unwrap();
+        write(&trash.join("old"), 4_096);
+        let policy = Policy::from_toml(&format!(
+            r#"
+            version = 1
+            [[rule]]
+            id = "trash"
+            kind = "trash"
+            reason = "The Trash."
+            match = {{ path = "{}" }}
+            "#,
+            trash.display()
+        ))
+        .unwrap();
+        let state = state_with(&root, policy);
+        let trash_id = || with_scan(&state, |scan| crate::trash_of(&state.policy, scan).map(|t| t.id));
+        let old = id_of(&state, &trash);
+        assert_eq!(trash_id(), Some(old));
+
+        fs::remove_dir_all(&trash).unwrap();
+        apply(&state, dirs(&[&root]));
+        assert_eq!(trash_id(), None, "the detached Trash is not reported");
+
+        fs::create_dir_all(&trash).unwrap();
+        write(&trash.join("new"), 4_096);
+        apply(&state, dirs(&[&root, &trash]));
+        let id = id_of(&state, &trash);
+        assert!(id != NONE && id != old);
+        assert_eq!(trash_id(), Some(id));
         fs::remove_dir_all(&root).unwrap();
     }
 }

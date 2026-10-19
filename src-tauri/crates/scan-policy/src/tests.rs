@@ -253,56 +253,56 @@ fn stamps_flags_and_records_the_strongest_rule() {
 }
 
 #[test]
-fn stamps_nodes_appended_since_the_last_stamp() {
+fn stamp_ids_follows_sizes_across_min_bytes() {
     let mut f = fixture();
-    let src = r#"
-        version = 1
-        [[rule]]
-        id = "system"
-        kind = "protected"
-        reason = "x"
-        match = { path = "/System" }
-        [[rule]]
-        id = "apps"
-        kind = "risky"
-        reason = "x"
-        match = { suffix = ".app" }
-        [[rule]]
-        id = "app-dirs"
-        kind = "unexpected"
-        reason = "x"
-        match = { parent = "/Applications", dir = true }
-    "#;
-    let policy = Policy::from_toml(src).unwrap();
+    let policy = Policy::from_toml(&rule_toml("unexpected", "under = \"~\", dir = true, min_bytes = 1000")).unwrap();
+    let resolved = policy.resolve(&f.arena, &f.index, &ctx());
+    let mut hits = resolved.stamp(&mut f.arena);
+    let (docs, photos) = (f.id("/Users/alex/Documents"), f.id("/Users/alex/Photos.photoslibrary"));
+    assert_eq!(hits.rule(docs), Some(0));
+    assert_eq!(hits.rule(photos), None);
+
+    f.arena.set_size(photos, 1500, NOW);
+    resolved.stamp_ids(&mut f.arena, [photos], &mut hits);
+    assert_eq!(f.arena.flags[photos as usize], Flags::DIR | Flags::UNEXPECTED);
+    assert_eq!(hits.rule(photos), Some(0));
+
+    let before = (f.arena.flags.clone(), hits.len());
+    resolved.stamp_ids(&mut f.arena, [photos, photos], &mut hits);
+    assert_eq!((f.arena.flags.clone(), hits.len()), before);
+
+    for p in ["/Users/alex/Documents/new.bin", "/Users/alex/Documents/undated.bin"] {
+        f.arena.set_size(f.id(p), 0, NOW);
+    }
+    resolved.stamp_ids(&mut f.arena, [docs], &mut hits);
+    assert_eq!(f.arena.flags[docs as usize], Flags::DIR);
+    assert_eq!(hits.rule(docs), None);
+
+    // `other` grows past the threshold with its child, but only ids passed in are evaluated.
+    let (other, target) = (f.id("/Users/alex/other"), f.id("/Users/alex/other/target"));
+    f.arena.set_size(target, 1500, NOW);
+    resolved.stamp_ids(&mut f.arena, [target], &mut hits);
+    assert!(f.arena.flags[target as usize].contains(Flags::UNEXPECTED));
+    assert_eq!(f.arena.flags[other as usize], Flags::DIR);
+    assert_eq!(hits.rule(other), None);
+}
+
+#[test]
+fn stamp_ids_protects_a_recreated_path() {
+    let mut f = fixture();
+    let policy = Policy::from_toml(&rule_toml("protected", "path = \"/System\"")).unwrap();
     let mut hits = policy.resolve(&f.arena, &f.index, &ctx()).stamp(&mut f.arena);
 
-    let from = f.arena.len() as NodeId;
-    let old_system = f.id("/System");
-    f.arena.mark_removed(old_system);
-    let system = f.arena.insert(0, b"System", 0, NOW, Flags::DIR);
-    let app = f.arena.insert(f.id("/Applications"), b"New.app", 0, NOW, Flags::DIR);
-    // Cleared so a sweep over old ids would show: only the pinned rules may touch them.
-    let (safari, readme) = (f.id("/Applications/Safari.app"), f.id("/Applications/readme.app"));
-    f.arena.flags[safari as usize] = Flags::DIR;
-    f.arena.flags[readme as usize] = Flags::empty();
-
+    let old = f.id("/System");
+    f.arena.mark_removed(old);
+    let new = f.arena.insert(0, b"System", 0, NOW, Flags::DIR);
     let index = ChildIndex::build(&f.arena);
-    let new = policy.resolve(&f.arena, &index, &ctx()).stamp_from(&mut f.arena, from);
-    let rule_id = |h: &PolicyHits, id| h.rule(id).map(|i| policy.rule(i).id.as_str());
+    policy.resolve(&f.arena, &index, &ctx()).stamp_ids(&mut f.arena, [old, new], &mut hits);
 
-    assert_eq!(f.arena.flags[system as usize], Flags::DIR | Flags::PROTECTED);
-    assert_eq!(rule_id(&new, system), Some("system"));
-    assert_eq!(new.rule(old_system), None);
-    assert_eq!(f.arena.flags[app as usize], Flags::DIR | Flags::RISKY | Flags::UNEXPECTED);
-    assert_eq!(rule_id(&new, app), Some("apps"));
-    assert_eq!(f.arena.flags[safari as usize], Flags::DIR | Flags::UNEXPECTED);
-    assert_eq!(rule_id(&new, safari), Some("app-dirs"));
-    assert_eq!(f.arena.flags[readme as usize], Flags::empty());
-    assert_eq!(new.rule(readme), None);
-
-    hits.extend(new);
-    assert_eq!(rule_id(&hits, system), Some("system"));
-    assert_eq!(rule_id(&hits, safari), Some("apps"));
+    assert_eq!(f.arena.flags[new as usize], Flags::DIR | Flags::PROTECTED);
+    assert_eq!(hits.rule(new), Some(0));
+    assert_eq!(f.arena.flags[old as usize], Flags::DIR | Flags::REMOVED);
+    assert_eq!(hits.rule(old), None);
 }
 
 #[test]
@@ -322,15 +322,20 @@ fn trash_rules_protect_the_folder_and_win_over_protected() {
         match = { parent = "~", name = ".Trash", dir = true }
     "#;
     let policy = Policy::from_toml(src).unwrap();
-    let hits = policy.resolve(&f.arena, &f.index, &ctx()).stamp(&mut f.arena);
+    let resolved = policy.resolve(&f.arena, &f.index, &ctx());
+    let mut hits = resolved.stamp(&mut f.arena);
+    let (trash, nested) = (f.id("/Users/alex/.Trash"), f.id("/Users/alex/Documents/.Trash"));
 
-    let trash = f.id("/Users/alex/.Trash");
-    assert_eq!(f.arena.flags[trash as usize], Flags::DIR | Flags::TRASH_FOLDER | Flags::PROTECTED);
-    assert_eq!(policy.rule(hits.rule(trash).unwrap()).kind.as_str(), "trash");
-
-    let nested = f.id("/Users/alex/Documents/.Trash");
-    assert_eq!(f.arena.flags[nested as usize], Flags::DIR | Flags::PROTECTED);
-    assert_eq!(policy.rule(hits.rule(nested).unwrap()).id, "keep");
+    // `stamp_ids` picks the same rule per node as the whole-arena pass.
+    for pass in 0..2 {
+        if pass == 1 {
+            resolved.stamp_ids(&mut f.arena, [trash, nested], &mut hits);
+        }
+        assert_eq!(f.arena.flags[trash as usize], Flags::DIR | Flags::TRASH_FOLDER | Flags::PROTECTED);
+        assert_eq!(policy.rule(hits.rule(trash).unwrap()).kind.as_str(), "trash");
+        assert_eq!(f.arena.flags[nested as usize], Flags::DIR | Flags::PROTECTED);
+        assert_eq!(policy.rule(hits.rule(nested).unwrap()).id, "keep");
+    }
 }
 
 #[test]
