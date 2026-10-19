@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-const STORAGE_KEY = "unshift.scanTotals";
+const STORAGE_KEY = "osoji.scanTotals";
 
 /** Bytes each root was found to hold by its last completed scan, kept across launches. */
 export type ScanTotals = {

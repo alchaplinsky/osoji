@@ -1058,7 +1058,7 @@ mod tests {
     fn scans_a_root_reached_through_a_symlink() {
         use std::fs;
         // Not canonicalized: on macOS the temp dir itself sits under the /var symlink.
-        let base = std::env::temp_dir().join(format!("unshift-symroot-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("osoji-symroot-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(base.join("real/sub")).unwrap();
         fs::write(base.join("real/sub/f"), [0u8; 4096]).unwrap();
@@ -1082,7 +1082,7 @@ mod tests {
     #[test]
     fn rejects_missing_or_unreadable_roots() {
         use std::os::unix::fs::PermissionsExt;
-        let base = std::env::temp_dir().join(format!("unshift-badroot-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("osoji-badroot-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
 
@@ -1114,7 +1114,7 @@ mod tests {
     #[test]
     fn suggests_each_app_cache_but_not_the_caches_folder() {
         // Real directories, so the writability guard sees writable parents.
-        let base = std::env::temp_dir().join(format!("unshift-caches-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("osoji-caches-{}", std::process::id()));
         let home = base.join("home");
         std::fs::create_dir_all(home.join("Library/Caches")).unwrap();
         std::fs::create_dir_all(home.join("Library/Developer/CoreSimulator/Caches")).unwrap();
@@ -1169,7 +1169,7 @@ mod tests {
     #[test]
     fn says_how_long_a_download_has_been_sitting_there() {
         const NOW: i64 = 1_700_000_000;
-        let base = std::env::temp_dir().join(format!("unshift-downloads-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("osoji-downloads-{}", std::process::id()));
         let home = base.join("home");
         std::fs::create_dir_all(home.join("Downloads")).unwrap();
 
@@ -1192,7 +1192,7 @@ mod tests {
 
     #[test]
     fn lists_a_folder_once_and_nothing_inside_it_or_inside_a_bundle() {
-        let base = std::env::temp_dir().join(format!("unshift-nested-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("osoji-nested-{}", std::process::id()));
         std::fs::create_dir_all(base.join("app")).unwrap();
 
         let mut a = Arena::default();

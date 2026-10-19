@@ -16,12 +16,12 @@ import os from "node:os";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
-const APP_BINARY = process.env.UNSHIFT_APP_BINARY ?? path.join(ROOT, "src-tauri", "target", "debug", "unshift-app");
+const APP_BINARY = process.env.OSOJI_APP_BINARY ?? path.join(ROOT, "src-tauri", "target", "debug", "osoji-app");
 const VITE_PORT = 1420;
 const WEBDRIVER_PORT = 4445;
 
 /** Fixture home folder the app scans; see `writeFixtureHome`. */
-export const FIXTURE_HOME = path.join(os.tmpdir(), `unshift-e2e-${process.pid}`);
+export const FIXTURE_HOME = path.join(os.tmpdir(), `osoji-e2e-${process.pid}`);
 
 let viteProcess: ChildProcess | undefined;
 let appProcess: ChildProcess | undefined;

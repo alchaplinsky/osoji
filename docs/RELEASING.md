@@ -18,7 +18,7 @@ bump version → run Release workflow (manual) → CI builds/signs/notarizes
 - **Update artifacts:** `createUpdaterArtifacts: true` emits `<app>.app.tar.gz`
   and a `.sig` signed with the Osoji minisign key.
 - **Endpoint:** the repo is public, so the app reads the manifest straight from
-  GitHub — `https://github.com/alchaplinsky/unshift/releases/latest/download/latest.json`
+  GitHub — `https://github.com/alchaplinsky/osoji/releases/latest/download/latest.json`
   (`plugins.updater.endpoints` in `src-tauri/tauri.conf.json`). No proxy needed.
 
 ## One-time setup
@@ -31,10 +31,10 @@ public key embedded in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`).
 Generate one (keep the private key **outside** the repo):
 
 ```sh
-bun run tauri signer generate -w ~/.tauri/unshift.key
+bun run tauri signer generate -w ~/.tauri/osoji.key
 ```
 
-Then paste the contents of `~/.tauri/unshift.key.pub` into
+Then paste the contents of `~/.tauri/osoji.key.pub` into
 `plugins.updater.pubkey` in `tauri.conf.json`. **If you lose the private key,
 existing installs can no longer auto-update** — they'd need a fresh manual
 install.
@@ -45,7 +45,7 @@ Set these under **Settings → Secrets and variables → Actions**:
 
 | Secret | How to produce it |
 | --- | --- |
-| `TAURI_SIGNING_PRIVATE_KEY` | Contents of `~/.tauri/unshift.key`. |
+| `TAURI_SIGNING_PRIVATE_KEY` | Contents of `~/.tauri/osoji.key`. |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password for that key (empty if generated without one). |
 | `APPLE_CERTIFICATE` | Export your "Developer ID Application" cert + key from Keychain as a `.p12`, then `base64 -i cert.p12 \| pbcopy`. |
 | `APPLE_CERTIFICATE_PASSWORD` | The password you set when exporting the `.p12`. |

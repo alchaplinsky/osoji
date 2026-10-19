@@ -4,7 +4,7 @@ import { chartVars } from "../design/palette";
 
 // Also read by the inline bootstrap script in index.html, which applies the saved
 // theme before CSS loads. Keep the key and the fallback logic in `initial` in sync.
-const STORAGE_KEY = "unshift.appearance";
+const STORAGE_KEY = "osoji.appearance";
 
 type Appearance = { theme: ThemeName; layout: LayoutName };
 type ThemeContextValue = Appearance & { setTheme: (t: ThemeName) => void; setLayout: (l: LayoutName) => void };
