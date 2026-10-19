@@ -8,7 +8,7 @@ import { useElementSize } from "../../hooks/useElementSize";
 import { nodeFill, nodeName } from "../../screens/Breakdown/slices";
 import { cx } from "../ui";
 import CenterLabel from "../viz/CenterLabel";
-import { GlassDefs, glass, glowOf, tint, usePaints } from "../viz/glass";
+import { GlassDefs, glass, tint, useLingering, usePaints } from "../viz/glass";
 import { pointerProps } from "../viz/interact";
 import type { Disk, VizProps } from "../viz/types";
 import { arcPath, geometry } from "./geometry";
@@ -36,6 +36,7 @@ export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp,
   const hoverKey = hoveredKey(view, hoverId);
   // Dark themes keep a soft halo on the inner ring; Light glows only on hover.
   const dark = THEMES[theme].dark;
+  const glowing = useLingering(hoverKey);
   const actions = { onHover, onDrill, onSelectFile, onContextMenu };
 
   return (
@@ -63,7 +64,13 @@ export default function Sunburst({ view, theme, hoverId, onHover, onDrill, onUp,
                   <path d={d} className={styles[arc.key as "hidden" | "free"]} style={arc.key === "hidden" ? { fill: paint("hidden") } : undefined} />
                 ) : (
                   <>
-                    <path d={d} className={glass.shape} filter={inBin ? undefined : glowOf(paint, hovered, dark && arc.depth === 1)} style={tint(color, inBin ? { fill: paint("binned") } : undefined)} />
+                    {!inBin && glowing.includes(arc.key) && <path d={d} className={glass.halo} filter={paint("glow")} style={tint(color)} />}
+                    <path
+                      d={d}
+                      className={glass.shape}
+                      filter={!inBin && dark && arc.depth === 1 ? paint("halo") : undefined}
+                      style={tint(color, inBin ? { fill: paint("binned") } : undefined)}
+                    />
                     {!inBin && <path d={d} className={glass.gloss} style={{ fill: paint("gloss") }} />}
                   </>
                 )}

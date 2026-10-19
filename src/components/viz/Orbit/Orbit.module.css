@@ -28,7 +28,7 @@
   cursor: pointer;
   transform-box: fill-box;
   transform-origin: center;
-  transition: opacity .18s, transform .18s var(--ease-out);
+  transition: opacity .25s, transform .32s var(--ease-glide);
 }
 .rest { cursor: default; }
 .lifted { transform: scale(1.06); }
