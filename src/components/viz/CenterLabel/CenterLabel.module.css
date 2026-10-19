@@ -18,3 +18,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.note {
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--fg3);
+}

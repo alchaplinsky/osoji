@@ -17,3 +17,8 @@ export function humanCount(n: number): string {
 export function humanDuration(ms: number): string {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
+
+/** A share in percent: one decimal below 10%, whole numbers above. */
+export function humanPercent(pct: number): string {
+  return `${pct.toFixed(pct < 10 ? 1 : 0)}%`;
+}

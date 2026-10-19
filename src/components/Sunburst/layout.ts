@@ -1,8 +1,10 @@
 import type { ViewNode } from "../../lib/api";
-import type { HoverId } from "../../lib/types";
+import type { DiskExtra, HoverId } from "../../lib/types";
 import { pathTo } from "../../lib/tree";
+import { nodeName } from "../../screens/Breakdown/slices";
+import type { Disk } from "../viz/types";
 
-export type SliceKey = number | `other:${number}`;
+export type SliceKey = number | `other:${number}` | DiskExtra;
 
 export const otherKey = (parentId: number): SliceKey => `other:${parentId}`;
 
@@ -10,7 +12,8 @@ export type Arc = {
   key: SliceKey;
   hover: HoverId;
   node: ViewNode | null;
-  parent: ViewNode;
+  name: string;
+  size: number;
   depth: number;
   index: number;
   a0: number;
@@ -19,9 +22,16 @@ export type Arc = {
 
 export const MAX_DEPTH = 3;
 const MIN_SPAN = 0.006;
-const TAU = Math.PI * 2;
+export const TAU = Math.PI * 2;
 
-export function layoutArcs(view: ViewNode): Arc[] {
+export const EXTRA_NAMES: Record<DiskExtra, string> = { hidden: "Not scanned", free: "Free" };
+
+/**
+ * Arcs for up to MAX_DEPTH rings below `view`, angles in [0, TAU] clockwise from 12 o'clock.
+ * The full circle is `view`, or the whole `disk` when given: the scanned children then cover the used
+ * share and the not-scanned and free space follow them on the inner ring.
+ */
+export function layoutArcs(view: ViewNode, disk?: Disk): Arc[] {
   const arcs: Arc[] = [];
 
   function visit(node: ViewNode, depth: number, a0: number, a1: number) {
@@ -33,24 +43,35 @@ export function layoutArcs(view: ViewNode): Arc[] {
       const start = a;
       a += span;
       if (span < MIN_SPAN) return;
-      arcs.push({ key: child.id, hover: child.id, node: child, parent: node, depth, index, a0: start, a1: a });
+      arcs.push({ key: child.id, hover: child.id, node: child, name: nodeName(child), size: child.size, depth, index, a0: start, a1: a });
       visit(child, depth + 1, start, a);
     });
     const span = node.other * scale;
     if (span >= MIN_SPAN) {
       const hover: HoverId = depth === 1 ? "other" : node.id;
-      arcs.push({ key: otherKey(node.id), hover, node: null, parent: node, depth, index: node.children.length, a0: a, a1: a + span });
+      const name = `${node.other_count} smaller items`;
+      arcs.push({ key: otherKey(node.id), hover, node: null, name, size: node.other, depth, index: node.children.length, a0: a, a1: a + span });
     }
   }
 
-  visit(view, 1, 0, TAU);
+  const whole = disk?.total ?? view.size;
+  if (whole <= 0) return arcs;
+  let end = (view.size / whole) * TAU;
+  visit(view, 1, 0, end);
+  if (disk) {
+    (["hidden", "free"] as const).forEach((extra) => {
+      const span = (disk[extra] / whole) * TAU;
+      if (span >= MIN_SPAN) arcs.push({ key: extra, hover: extra, node: null, name: EXTRA_NAMES[extra], size: disk[extra], depth: 1, index: 0, a0: end, a1: end + span });
+      end += span;
+    });
+  }
   return arcs;
 }
 
-// Keep the hovered node's ancestry and subtree bright so nested views share one hover model.
 export function relatedKeys(view: ViewNode, hoverId: HoverId): Set<SliceKey> | null {
   if (hoverId === null) return null;
   if (hoverId === "other") return new Set([otherKey(view.id)]);
+  if (hoverId === "hidden" || hoverId === "free") return new Set([hoverId]);
   const path = pathTo(view, hoverId);
   const target = path.at(-1);
   if (!target) return null;

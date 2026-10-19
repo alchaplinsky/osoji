@@ -12,6 +12,7 @@ import HoverLabel from "./HoverLabel";
 import ListPanel from "./ListPanel";
 import ListToggle from "./ListToggle";
 import VizSwitcher from "./VizSwitcher";
+import { diskOf } from "./CapacityBar/capacity";
 import { capacityHover, hoverTarget } from "./hover";
 import { visibleSlices } from "./slices";
 import styles from "./Breakdown.module.css";
@@ -89,6 +90,8 @@ export default function BreakdownScreen({
   const pending = binItems.reduce((sum, item) => sum + item.size, 0);
   const View = VIEWS[viz];
   const rest = viz === "sunburst" ? undefined : visibleSlices(view, theme).find((s) => !s.node);
+  // Only the sunburst spans the disk; the other charts show the scanned folder.
+  const disk = useMemo(() => (viz === "sunburst" ? diskOf(volume, rootView, view) : undefined), [viz, volume, rootView, view]);
   const vizProps: VizProps = {
     view,
     theme,
@@ -98,6 +101,7 @@ export default function BreakdownScreen({
     onUp,
     onSelectFile: onToggleBin,
     onContextMenu: onItemMenu,
+    disk,
     centerSize: listOpen ? 20 : 24,
     className: STAGE_CLASS[viz],
   };
@@ -117,7 +121,7 @@ export default function BreakdownScreen({
       />
       <div className={cx(styles.body, listOpen ? styles.listOpen : styles.listHidden)}>
         <div className={styles.viz}>
-          <HoverLabel target={hoverTarget(view, rootView, theme, hoverId, rest)} hint={HINTS[viz]} />
+          <HoverLabel target={hoverTarget(view, rootView, theme, hoverId, rest, disk)} hint={HINTS[viz]} />
           <VizSwitcher viz={viz} onViz={onViz} className={styles.vizSwitcher} />
           <div className={styles.stage}>
             <View {...vizProps} />

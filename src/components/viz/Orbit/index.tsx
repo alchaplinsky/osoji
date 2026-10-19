@@ -44,7 +44,7 @@ export default function Orbit({ view, theme, hoverId, onHover, onDrill, onUp, on
             <circle className={styles.core} cx={x0} cy={y0} r={Math.round(R * CORE)} onClick={onUp} />
           </svg>
           <MoonLabels moons={moons} geometry={geometry} hoverId={hoverId} related={related} />
-          <CenterLabel view={view} size={centerSize} />
+          <CenterLabel name={view.name} size={view.size} fontSize={centerSize} />
         </>
       )}
     </div>

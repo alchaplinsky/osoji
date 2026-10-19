@@ -28,7 +28,7 @@ export default function CapacityBar({ volume, root, hoverId, onHover, onOpen, pe
   const segments = slicesOf(root, theme);
   const dimmed = (s: Slice) => !isRelated(related, s.key);
   const hidden = hiddenBytes(volume, root);
-  const notScanned: NotScanned | null = hidden > 0 ? { size: hidden, title: hiddenNote(unreadable), color: neutral(theme), dimmed: hoverId !== null } : null;
+  const notScanned: NotScanned | null = hidden > 0 ? { size: hidden, title: hiddenNote(unreadable), color: neutral(theme), dimmed: hoverId !== null && hoverId !== "hidden" } : null;
   const open = (s: Slice) => {
     if (s.node?.dir) onOpen(s.node.id);
   };
