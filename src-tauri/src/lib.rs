@@ -341,7 +341,7 @@ async fn scan(
     let watcher = match watcher.map_err(|e| e.to_string()).and_then(|w| w.map_err(|e| e.to_string())) {
         Ok(w) => Some(w),
         Err(e) => {
-            eprintln!("watch {}: {e}; the scan will not follow changes", canonical.display());
+            log::warn!("watch {}: {e}; the scan will not follow changes", canonical.display());
             None
         }
     };
@@ -986,11 +986,18 @@ fn open_privacy_settings() -> Result<(), String> {
     std::process::Command::new("open").arg(PRIVACY_ALL_FILES_URL).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// The log file rolls over past this, keeping one previous file; the plugin's 40 KB default fills
+/// in a session on a busy disk.
+const LOG_FILE_BYTES: u128 = 1 << 20;
+
 pub fn run() {
     scan_macos::disable_dataless_materialization();
     scan_macos::raise_fd_limit();
     let policy = Policy::for_current_os().unwrap_or_else(|e| panic!("bundled {e}"));
+    // Warnings and errors go to stdout and to ~/Library/Logs/dev.osoji.app/, so a release build
+    // launched from Finder, whose stderr goes nowhere, still leaves a file a user can send.
     let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_log::Builder::new().level(log::LevelFilter::Info).max_file_size(LOG_FILE_BYTES).build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init());
@@ -1006,8 +1013,8 @@ pub fn run() {
             {
                 match app.get_webview_window("main").map(|w| w.ns_window()) {
                     Some(Ok(ns_window)) => zoom::install(ns_window),
-                    Some(Err(e)) => eprintln!("zoom: no NSWindow for main ({e}); zoom stays native"),
-                    None => eprintln!("zoom: no main window at setup; zoom stays native"),
+                    Some(Err(e)) => log::warn!("zoom: no NSWindow for main ({e}); zoom stays native"),
+                    None => log::warn!("zoom: no main window at setup; zoom stays native"),
                 }
             }
             Ok(())

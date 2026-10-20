@@ -29,12 +29,12 @@ static RESTORE: Mutex<Option<HashMap<usize, NSRect>>> = Mutex::new(None);
 /// Main thread only. Any failure leaves the native zoom in place.
 pub fn install(ns_window: *mut c_void) {
     if ns_window.is_null() {
-        eprintln!("zoom: main window has no NSWindow; zoom stays native");
+        log::warn!("zoom: main window has no NSWindow; zoom stays native");
         return;
     }
     let window: &NSWindow = unsafe { &*ns_window.cast::<NSWindow>() };
     let Some(delegate) = window.delegate() else {
-        eprintln!("zoom: main window has no delegate; zoom stays native");
+        log::warn!("zoom: main window has no delegate; zoom stays native");
         return;
     };
     let class: *const AnyClass = unsafe { msg_send![&*delegate, class] };
@@ -49,7 +49,7 @@ pub fn install(ns_window: *mut c_void) {
         )
     };
     if !added.as_bool() {
-        eprintln!("zoom: window delegate already handles windowShouldZoom:toFrame:; zoom stays native");
+        log::warn!("zoom: window delegate already handles windowShouldZoom:toFrame:; zoom stays native");
     }
 }
 

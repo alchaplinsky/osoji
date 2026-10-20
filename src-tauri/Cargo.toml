@@ -39,6 +39,9 @@ tauri-plugin-dialog = "2"
 # checks + stages a signed release, `process` relaunches into it.
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# Diagnostics via `log::warn!` etc. land on stdout and in ~/Library/Logs/dev.osoji.app/ (lib.rs run()).
+tauri-plugin-log = "2"
+log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 trash = "5"
