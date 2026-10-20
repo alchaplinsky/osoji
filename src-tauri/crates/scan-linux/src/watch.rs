@@ -36,8 +36,9 @@ type Item = notify::Result<Event>;
 /// Watches a root recursively until dropped.
 pub struct Watcher {
     root: PathBuf,
-    /// Private directory in the same watcher as the root, written once to prove it delivers.
-    /// Its events never reach `on_batch`.
+    /// Private directory watched alongside the root and written once to prove the watcher
+    /// delivers. Removed as soon as `start` has its answer, so no scan ever counts it; its
+    /// events, including its own removal, never reach `on_batch`.
     probe: PathBuf,
     inner: Option<RecommendedWatcher>,
     worker: Option<JoinHandle<()>>,
@@ -110,6 +111,10 @@ impl Watcher {
                 format!("inotify delivered nothing for {} within {READY_TIMEOUT:?}", w.root.display()),
             ));
         }
+        // The probe has done its job. The app starts the watcher before it walks, so removing
+        // it now keeps it out of the scan even when the root is `/` or the temp directory.
+        let _ = inner.unwatch(&w.probe);
+        let _ = fs::remove_dir_all(&w.probe);
         Ok(w)
     }
 }
@@ -122,6 +127,7 @@ impl Drop for Watcher {
         if let Some(t) = self.worker.take() {
             let _ = t.join();
         }
+        // Already gone after a successful start; this covers a start that failed midway.
         let _ = fs::remove_dir_all(&self.probe);
     }
 }
@@ -451,7 +457,7 @@ mod tests {
             assert!(w.probe.starts_with(&root));
             write(&a.join("f"), 10);
             await_dirs(&rx, &w, &[&a]);
-            // The probe's creation and marker events may still be queued, so drain and check those too.
+            // The probe's creation, marker and removal events may still be queued, so drain and check those too.
             while let Ok(b) = rx.recv_timeout(Duration::from_millis(1500)) {
                 check(&b, &root, &w.probe);
             }
@@ -459,14 +465,16 @@ mod tests {
             fs::remove_dir_all(&root).unwrap();
         }
 
+        /// A scan of `/` or the temp directory runs after `start`, so the probe must be gone by then.
         #[test]
-        fn drop_removes_the_probe() {
-            let root = temp_root("probe-drop");
-            let (w, _rx) = start(&root);
-            let probe = w.probe.clone();
-            assert!(probe.is_dir());
+        fn start_removes_the_probe() {
+            let root = temp_root("probe-gone");
+            let (w, rx) = start(&root);
+            assert!(!w.probe.exists(), "probe {} outlived start", w.probe.display());
+            // The watcher still works without it.
+            write(&root.join("f"), 10);
+            await_dirs(&rx, &w, &[&root]);
             drop(w);
-            assert!(!probe.exists());
             fs::remove_dir_all(&root).unwrap();
         }
 
