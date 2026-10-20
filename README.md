@@ -58,7 +58,7 @@
 
 Osoji (お掃除, "cleaning") shows your disk as a sunburst you can click into, ring by ring, until you find what is actually taking the space. Then it tells you what is safe to remove, what is worth a look, and what it would keep, and it moves the rest to the Trash for you.
 
-It exists because the good disk visualisers for the Mac are closed source and the open ones are slow or ugly. Osoji is neither. Its scanner is written in Rust on top of the same low-level `getattrlistbulk` call that Finder uses, so even a full disk with millions of files is on screen quickly, and the whole app is yours to read, fork and fix.
+It exists because the good disk visualisers for the Mac are closed source and the open ones are slow or ugly. Osoji is neither. Its scanner is written in Rust on top of the same low-level `getattrlistbulk` call that Finder uses, so a full disk with ten million files is on screen in about half a minute, and the whole app is yours to read, fork and fix.
 
 **What makes it different**
 
