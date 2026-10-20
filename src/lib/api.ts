@@ -51,6 +51,8 @@ export const showTrash = () => invoke<void>("show_trash");
 export const homeDir = () => invoke<string>("home_dir");
 export const volumeInfo = (path: string) => invoke<VolumeInfo>("volume_info", { path });
 export const fullDiskAccess = () => invoke<boolean>("full_disk_access");
+/** Brings in the folders the scan could not read, once access was granted; resolves to how many still cannot be read. */
+export const retryUnreadable = () => invoke<number>("retry_unreadable");
 export const openPrivacySettings = () => invoke<void>("open_privacy_settings");
 export const volumes = () => invoke<VolumeInfo[]>("volumes");
 

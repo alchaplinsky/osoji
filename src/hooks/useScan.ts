@@ -42,5 +42,8 @@ export function useScan() {
     setError(null);
   }, []);
 
-  return { status, progress, summary, error, start, cancel, reset };
+  /** After the unreadable folders were retried: how many the scan still cannot read. */
+  const setErrors = useCallback((errors: number) => setSummary((s) => (s ? { ...s, errors } : s)), []);
+
+  return { status, progress, summary, error, start, cancel, reset, setErrors };
 }
