@@ -27,7 +27,7 @@ import { homeDir, nodeInfo, reveal, trashInfo, trashNodes, volumeInfo, volumes a
 import type { TrashInfo, TrashProgress } from "./lib/api";
 import { GB, humanBytes } from "./lib/format";
 import { isProtected, reviewWarning } from "./lib/bin";
-import { expectedBytes } from "./lib/scanEstimate";
+import { expectedScan } from "./lib/scanEstimate";
 import { useScanTotals } from "./hooks/useScanTotals";
 import { pathTo } from "./lib/tree";
 import type { BinItem, HoverId, Screen, Viz, Volume, WatcherStatus } from "./lib/types";
@@ -54,7 +54,10 @@ export default function App() {
   const [volume, setVolume] = useState<Volume | null>(null);
   const [volumes, setVolumes] = useState<Volume[]>([]);
   const totals = useScanTotals();
-  const [finishing, setFinishing] = useState(false);
+  /** The finished scan's breakdown has taken over (or failed to load), so the scan screen rests instead of holding 100%. */
+  const [handedOff, setHandedOff] = useState(false);
+  /** Bumped on every scan status change; a hand-off whose number has moved on does nothing. */
+  const handoff = useRef(0);
   const [hoverId, setHoverId] = useState<HoverId>(null);
   const [listOpen, setListOpen] = useState(true);
   const [review, setReview] = useState(false);
@@ -95,8 +98,16 @@ export default function App() {
   const { refresh: refreshWatchers, reset: resetWatchers } = watchers;
   const { clear: clearBin } = bin;
   const { remember } = totals;
+  // Derived rather than set in the effect below: a render between "done" and `finishing` would show
+  // the ring at rest for a frame and restart its easing from zero, cutting the 100% rest short.
+  const finishing = scan.status === "done" && scan.summary !== null && !scan.summary.cancelled && !handedOff;
   useEffect(() => {
+    // Any status change (a new scan, a root change, a stop) retires the hand-off in flight, so it
+    // cannot switch to the breakdown or mark a later scan as handed off from a stale callback.
+    const gen = ++handoff.current;
+    const current = () => gen === handoff.current;
     if (scan.status === "scanning") {
+      setHandedOff(false);
       reset();
       resetInsights();
       resetWatchers();
@@ -105,13 +116,17 @@ export default function App() {
     if (scan.status === "done") {
       const done = scan.summary;
       const completed = done !== null && !done.cancelled;
-      if (completed) remember(done.root, done.bytes);
-      setFinishing(completed);
+      if (completed) remember(done.root, { bytes: done.bytes, entries: done.entries });
       const settle = new Promise((resolve) => setTimeout(resolve, completed ? SCAN_SETTLE_MS : 0));
-      Promise.all([load(0), loadInsights(), refreshWatchers(), loadTrash(), settle])
-        .then(() => setScreen("breakdown"))
+      // The breakdown needs only the root view. The rest feeds other screens and badges, and the
+      // slowest of it (suggestions, largest files) passes over every node. Every read takes the
+      // same scan lock, so the rest starts only once the root view is back, never ahead of it.
+      const view = load(0);
+      view.then(() => (current() ? Promise.all([loadInsights(), refreshWatchers(), loadTrash()]) : undefined)).catch(console.error);
+      Promise.all([view, settle])
+        .then(() => current() && setScreen("breakdown"))
         .catch(console.error)
-        .finally(() => setFinishing(false));
+        .finally(() => current() && setHandedOff(true));
     }
   }, [scan.status, scan.summary, load, reset, loadInsights, resetInsights, refreshWatchers, resetWatchers, clearBin, remember, loadTrash]);
 
@@ -306,10 +321,11 @@ export default function App() {
         {active === "scan" && (
           <ScanScreen
             volume={volume}
+            scanRoot={scanRoot}
             rootLabel={rootLabel}
             status={scan.status}
             progress={scan.progress}
-            expectedBytes={expectedBytes(volume, scanRoot, totals.get(scanRoot))}
+            expected={expectedScan(volume, scanRoot, totals.get(scanRoot))}
             finishing={finishing}
             summary={scan.summary}
             error={scan.error}

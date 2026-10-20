@@ -5,7 +5,7 @@ import { Button } from "../../components/ui";
 import type { ScanStatus } from "../../hooks/useScan";
 import type { ProgressMsg, ScanSummary } from "../../lib/api";
 import { GB } from "../../lib/format";
-import { expectedBytes } from "../../lib/scanEstimate";
+import { expectedScan } from "../../lib/scanEstimate";
 import type { Screen, Volume } from "../../lib/types";
 import ScanScreen, { SCAN_SETTLE_MS } from "../../screens/Scan";
 import SettingsScreen from "../../screens/Settings";
@@ -136,10 +136,11 @@ export default function ShellPreview() {
         {screen === "scan" && (
           <ScanScreen
             volume={VOLUME}
+            scanRoot={scanRoot}
             rootLabel={rootLabel(scanRoot)}
             status={status}
             progress={progress}
-            expectedBytes={expectedBytes(VOLUME, scanRoot, summary && !summary.cancelled ? summary.bytes : null)}
+            expected={expectedScan(VOLUME, scanRoot, summary && !summary.cancelled ? { bytes: summary.bytes, entries: summary.entries } : null)}
             finishing={finishing}
             summary={summary}
             error={status === "error" ? "Permission denied (os error 13) while reading /private/var/db" : null}
