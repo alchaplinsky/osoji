@@ -24,6 +24,9 @@ set -a
 source .env
 set +a
 
+# Same version-agreement check the Release workflow runs, but fails fast.
+./scripts/check-version.sh >/dev/null
+
 # Ensure both arch targets exist for the universal lipo.
 rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null 2>&1 || true
 

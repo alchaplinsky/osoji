@@ -4,7 +4,7 @@ members = [".", "crates/scan-core", "crates/scan-macos", "crates/scan-cli", "cra
 
 [workspace.package]
 edition = "2021"
-version = "0.1.0"
+version = "1.0.0"
 
 [profile.release]
 debug = 1
