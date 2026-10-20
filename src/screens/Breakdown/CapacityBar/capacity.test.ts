@@ -1,9 +1,8 @@
 import { describe, expect, test } from "vitest";
 import type { ViewNode } from "../../../lib/api";
+import { GB } from "../../../lib/format";
 import type { Volume } from "../../../lib/types";
 import { hiddenBytes, hiddenNote } from "./capacity";
-
-const GB = 1024 ** 3;
 const volume: Volume = { name: "Macintosh HD", mount: "/", total: 1000 * GB, free: 400 * GB };
 
 const node = (name: string, size: number): ViewNode => ({

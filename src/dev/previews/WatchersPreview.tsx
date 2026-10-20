@@ -1,9 +1,8 @@
 import { useState } from "react";
 import WatchersScreen from "../../screens/Watchers";
+import { GB } from "../../lib/format";
 import type { WatcherStatus } from "../../lib/types";
 import styles from "./LargestPreview.module.css";
-
-const GB = 2 ** 30;
 
 const STATUSES: WatcherStatus[] = [
   { path: "/Users/alex/Downloads", limit: 20 * GB, id: 31, size: Math.round(26.4 * GB), dir: true },

@@ -2,11 +2,10 @@ import { useMemo, useState } from "react";
 import BreakdownScreen from "../../screens/Breakdown";
 import { useTheme } from "../../hooks/useTheme";
 import type { NodeInfo, ViewNode } from "../../lib/api";
+import { GB } from "../../lib/format";
 import type { BinItem, HoverId, Viz, Volume } from "../../lib/types";
 import { findNode, pathTo } from "../../lib/tree";
 import styles from "./BreakdownPreview.module.css";
-
-const GB = 2 ** 30;
 
 let nextId = 1;
 
@@ -72,7 +71,7 @@ const ROOT: ViewNode = {
   name: "/",
 };
 
-const VOLUME: Volume = { name: "Macintosh HD", mount: "/", total: 1024 * GB, free: 412 * GB };
+const VOLUME: Volume = { name: "Macintosh HD", mount: "/", total: 994.7 * GB, free: 412 * GB };
 
 function infoFor(node: ViewNode): NodeInfo {
   const ancestors = pathTo(ROOT, node.id)

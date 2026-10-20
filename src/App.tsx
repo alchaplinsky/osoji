@@ -25,7 +25,7 @@ import { useAutoUpdate } from "./hooks/useAutoUpdate";
 import UpdateToast from "./components/UpdateToast";
 import { homeDir, nodeInfo, reveal, trashInfo, trashNodes, volumeInfo, volumes as listVolumes } from "./lib/api";
 import type { TrashInfo, TrashProgress } from "./lib/api";
-import { humanBytes } from "./lib/format";
+import { GB, humanBytes } from "./lib/format";
 import { isProtected, reviewWarning } from "./lib/bin";
 import { expectedBytes } from "./lib/scanEstimate";
 import { useScanTotals } from "./hooks/useScanTotals";
@@ -34,7 +34,7 @@ import type { BinItem, HoverId, Screen, Viz, Volume, WatcherStatus } from "./lib
 import styles from "./App.module.css";
 
 const TOAST_MS = 4500;
-const BIG_ITEM = 1024 ** 3;
+const BIG_ITEM = GB;
 
 export default function App() {
   const scan = useScan();

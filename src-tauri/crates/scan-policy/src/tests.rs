@@ -356,11 +356,12 @@ fn fills_age_and_size_into_reasons() {
     let reason = |p: &str| policy.reason_for(0, &f.arena, f.id(p), &ctx());
     assert_eq!(reason("/Users/alex/Documents/old.bin"), "900 B, untouched for 1 year.");
     assert_eq!(reason("/Users/alex/Documents/undated.bin"), "900 B, untouched for an unknown time.");
-    assert_eq!(reason("/Users/alex/Documents"), "2.64 KB, untouched for 1 day.");
+    assert_eq!(reason("/Users/alex/Documents"), "2.70 KB, untouched for 1 day.");
     assert_eq!(reason::span(59), "59 days");
     assert_eq!(reason::span(200), "6 months");
     assert_eq!(reason::span(800), "2 years");
-    assert_eq!(reason::human_size(15 * 1024 * 1024 * 1024), "15.0 GB");
+    assert_eq!(reason::human_size(15_000_000_000), "15.0 GB");
+    assert_eq!(reason::human_size(994_662_584_320), "994.7 GB");
 }
 
 #[test]

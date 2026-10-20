@@ -1,6 +1,4 @@
-import { humanBytes } from "../../lib/format";
-
-const GB = 2 ** 30;
+import { GB, humanBytes } from "../../lib/format";
 
 export const LIMIT_OPTIONS = [5, 10, 20, 50, 100].map((gb, i, all) => ({
   value: String(gb * GB),

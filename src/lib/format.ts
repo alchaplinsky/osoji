@@ -1,10 +1,18 @@
+/**
+ * Sizes are decimal, as Finder, Disk Utility and Storage settings print them: 1 GB is 10⁹ bytes.
+ * Dividing by 1024 under a "GB" label is what makes a 1 TB disk read as 931 GB.
+ */
+export const KB = 1000;
+export const MB = 1000 * KB;
+export const GB = 1000 * MB;
+
 const UNITS = ["B", "KB", "MB", "GB", "TB", "PB"];
 
 export function humanBytes(bytes: number): string {
   let v = bytes;
   let i = 0;
-  while (v >= 1024 && i < UNITS.length - 1) {
-    v /= 1024;
+  while (v >= KB && i < UNITS.length - 1) {
+    v /= KB;
     i++;
   }
   return i === 0 ? `${bytes} B` : `${v.toFixed(v < 10 ? 2 : 1)} ${UNITS[i]}`;

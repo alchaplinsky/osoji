@@ -46,8 +46,8 @@ fn human(bytes: u64) -> String {
     const U: [&str; 6] = ["B", "KB", "MB", "GB", "TB", "PB"];
     let mut v = bytes as f64;
     let mut i = 0;
-    while v >= 1024.0 && i < U.len() - 1 {
-        v /= 1024.0;
+    while v >= 1000.0 && i < U.len() - 1 {
+        v /= 1000.0;
         i += 1;
     }
     if i == 0 {

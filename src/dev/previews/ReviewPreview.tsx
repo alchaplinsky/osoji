@@ -1,11 +1,9 @@
 import { useState } from "react";
 import ReviewSheet from "../../components/ReviewSheet";
 import { Button, Toggle } from "../../components/ui";
+import { GB, MB } from "../../lib/format";
 import type { BinItem } from "../../lib/types";
 import styles from "./ReviewPreview.module.css";
-
-const GB = 1024 ** 3;
-const MB = 1024 ** 2;
 
 const ITEMS: BinItem[] = [
   { id: 12, name: "Caches", path: "/Users/alex/Library/Caches", size: 18.4 * GB, dir: true, ancestors: [0, 1, 2, 3] },

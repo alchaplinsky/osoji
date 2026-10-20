@@ -59,7 +59,7 @@ export default function DiskCard({ volume, volumes, scanRoot, home, disabled, on
         {showRoot && <Mono className={styles.root}>{scanRoot}</Mono>}
         <ProgressBar value={usedPct} height={3} className={styles.bar} />
         <Mono size={11} className={styles.meta}>
-          {volume ? `${humanBytes(volume.free)} free · ${humanBytes(volume.total)}` : "— free · —"}
+          {volume ? `${humanBytes(volume.total)} · ${humanBytes(volume.free)} free` : "— · — free"}
         </Mono>
       </button>
       <Menu
