@@ -928,6 +928,19 @@ fn platform() -> &'static str {
     std::env::consts::OS
 }
 
+/// Whether this build can replace itself with a newer release. Always on macOS. On Linux only an
+/// AppImage, which the updater swaps in place; for a .deb it would run `dpkg` through `pkexec`,
+/// and a disk cleaner asking for the root password is not a prompt a user should see. The
+/// updater plugin is only registered when this holds (see `run`), so the UI asks before checking.
+fn can_self_update() -> bool {
+    !cfg!(target_os = "linux") || std::env::var_os("APPIMAGE").is_some()
+}
+
+#[tauri::command]
+fn updater_available() -> bool {
+    can_self_update()
+}
+
 /// The log file rolls over past this, keeping one previous file; the plugin's 40 KB default fills
 /// in a session on a busy disk.
 const LOG_FILE_BYTES: u128 = 1 << 20;
@@ -954,8 +967,10 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().level(log::LevelFilter::Info).max_file_size(LOG_FILE_BYTES).build())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init());
+    // Only where an update can be applied (can_self_update); a .deb install gets none.
+    let builder =
+        if can_self_update() { builder.plugin(tauri_plugin_updater::Builder::new().build()) } else { builder };
     // WebDriver server on 127.0.0.1:4445 for tests/e2e; only in builds with `--features webdriver`.
     #[cfg(feature = "webdriver")]
     let builder = builder.plugin(tauri_plugin_webdriver::init());
@@ -963,6 +978,9 @@ pub fn run() {
         .manage(AppState { policy, ..AppState::default() })
         .setup(|app| {
             install_zoom(app);
+            if !can_self_update() {
+                log::info!("updater off: not running as an AppImage; update by installing the next package");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -983,7 +1001,8 @@ pub fn run() {
             retry_unreadable,
             open_privacy_settings,
             volumes,
-            platform
+            platform,
+            updater_available
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

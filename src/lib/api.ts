@@ -57,6 +57,8 @@ export const openPrivacySettings = () => invoke<void>("open_privacy_settings");
 export const volumes = () => invoke<VolumeInfo[]>("volumes");
 /** The OS the backend was built for, as Rust's `std::env::consts::OS` names it ("macos", "linux"). */
 export const platform = () => invoke<string>("platform");
+/** Whether this install can replace itself with a newer release: always on macOS, only AppImage installs on Linux. */
+export const updaterAvailable = () => invoke<boolean>("updater_available");
 
 export const onScanChanged = (handler: (e: ScanChanged) => void): Promise<UnlistenFn> =>
   listen<ScanChanged>("scan:changed", (e) => handler(e.payload));
