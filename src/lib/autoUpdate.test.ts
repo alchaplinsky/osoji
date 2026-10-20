@@ -3,10 +3,12 @@ import type { DownloadEvent } from "@tauri-apps/plugin-updater";
 import type { UpdateProgress } from "./autoUpdate";
 
 const check = vi.fn();
+const updaterAvailable = vi.fn();
 vi.mock("@tauri-apps/plugin-updater", () => ({ check: () => check() }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: vi.fn() }));
+vi.mock("./api", () => ({ updaterAvailable: () => updaterAvailable() }));
 
-const { checkForUpdate } = await import("./autoUpdate");
+const { checkForUpdate, runStartupUpdateCheck } = await import("./autoUpdate");
 
 /** An update whose download replays `events` through the progress callback. */
 function updateEmitting(events: DownloadEvent[]) {
@@ -60,5 +62,44 @@ describe("checkForUpdate", () => {
     check.mockRejectedValue(new Error("offline"));
 
     expect(await checkForUpdate()).toEqual({ kind: "error", message: "Error: offline" });
+  });
+});
+
+describe("runStartupUpdateCheck", () => {
+  beforeEach(() => {
+    check.mockReset();
+    updaterAvailable.mockReset();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    // The startup check is a no-op in dev; the tests run as a release build would.
+    vi.stubEnv("DEV", false);
+  });
+
+  test("does not ask an install that cannot update itself", async () => {
+    updaterAvailable.mockResolvedValue(false);
+    const onStaged = vi.fn();
+
+    await runStartupUpdateCheck(onStaged);
+
+    expect(check).not.toHaveBeenCalled();
+    expect(onStaged).not.toHaveBeenCalled();
+  });
+
+  test("treats a failed availability probe as unavailable instead of rejecting", async () => {
+    updaterAvailable.mockRejectedValue(new Error("no such command"));
+    const onStaged = vi.fn();
+
+    await expect(runStartupUpdateCheck(onStaged)).resolves.toBeUndefined();
+
+    expect(check).not.toHaveBeenCalled();
+    expect(onStaged).not.toHaveBeenCalled();
+  });
+
+  test("checks when the install can update itself", async () => {
+    updaterAvailable.mockResolvedValue(true);
+    check.mockResolvedValue(null);
+
+    await runStartupUpdateCheck(vi.fn());
+
+    expect(check).toHaveBeenCalledTimes(1);
   });
 });

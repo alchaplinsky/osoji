@@ -3,8 +3,9 @@ name: Release
 # Manual only. Bump `version` in src-tauri/tauri.conf.json, src-tauri/Cargo.toml
 # ([workspace.package]) and package.json before running — `scripts/check-version.sh`
 # asserts they agree, in CI and again as the first step below. This builds,
-# signs, and notarizes a universal macOS app and creates a PUBLISHED GitHub
-# release with the .dmg, the updater artifact (.app.tar.gz + .sig), and
+# signs, and notarizes a universal macOS app, then builds a Linux AppImage and
+# .deb, and creates a PUBLISHED GitHub release with the .dmg, the AppImage, the
+# .deb, the updater artifacts (.app.tar.gz + .sig, .AppImage + .sig) and
 # latest.json. Publishing makes it available to the in-app auto-updater, which
 # reads latest.json straight from the public release (see docs/RELEASING.md).
 on:
@@ -65,10 +66,75 @@ jobs:
           tauriScript: bun run tauri
           args: --target universal-apple-darwin
 
-      # Replace the placeholder release body with GitHub's auto-generated
-      # release notes (the same "What's Changed" list the UI button produces),
-      # built from PRs/commits since the previous release. The updater shows
-      # this body in the "Update ready" toast.
+  # Linux bundles, uploaded to the release the macOS job created. It waits for
+  # that job on purpose: tauri-action writes latest.json by downloading the one
+  # already on the release, adding its own platforms and uploading the merge,
+  # with nothing to stop two jobs doing that at once and one dropping the
+  # other's entries.
+  release-linux:
+    needs: release
+    permissions:
+      contents: write
+    # 22.04 rather than latest: the AppImage carries the glibc version it was
+    # linked against as its floor, so the older runner keeps it runnable on
+    # older distros.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build and upload Linux bundles
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Same minisign keypair: the AppImage is what the updater serves.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v__VERSION__
+          releaseName: Osoji v__VERSION__
+          releaseBody: See the assets to download and install this version.
+          releaseDraft: false
+          prerelease: false
+          tauriScript: bun run tauri
+          # No rpm until something tests it. The AppImage becomes the
+          # linux-x86_64 entry of latest.json; the .deb is a plain install that
+          # never updates itself (docs/RELEASING.md).
+          args: --bundles appimage,deb
+
+  # Replace the placeholder release body with GitHub's auto-generated release
+  # notes (the same "What's Changed" list the UI button produces), built from
+  # PRs/commits since the previous release. The updater shows this body in the
+  # "Update ready" toast. After both builds, so a failed Linux build leaves the
+  # placeholder as a sign that the release is not complete.
+  release-notes:
+    needs: [release, release-linux]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Generate release notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

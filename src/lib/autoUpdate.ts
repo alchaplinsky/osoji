@@ -12,6 +12,7 @@
 
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
+import { updaterAvailable } from "./api";
 
 /** Outcome of a single update check. */
 export type UpdateCheckResult =
@@ -78,12 +79,20 @@ export async function checkForUpdate(onProgress?: (progress: UpdateProgress) => 
 
 /**
  * Check for an update once at startup, silently. No-op in dev (builds aren't
- * signed and have no release endpoint), and never surfaces anything unless an
- * update was actually staged — in which case `onStaged` fires with the new
+ * signed and have no release endpoint) and in installs that cannot replace
+ * themselves (a Linux .deb: the backend does not even register the updater
+ * there, so asking it would only log a failure). Never surfaces anything unless
+ * an update was actually staged — in which case `onStaged` fires with the new
  * version so the app can offer a restart.
  */
 export async function runStartupUpdateCheck(onStaged: (version: string, notes: string | null) => void): Promise<void> {
   if (import.meta.env.DEV) return;
+  // A failed probe counts as "cannot update": this runs fire-and-forget at startup and must never reject.
+  const available = await updaterAvailable().catch((err: unknown) => {
+    console.warn("Updater availability check failed:", err);
+    return false;
+  });
+  if (!available) return;
 
   const result = await checkForUpdate();
   if (result.kind === "staged") onStaged(result.version, result.notes);
