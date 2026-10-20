@@ -443,6 +443,20 @@ pub struct ScanConfig {
     pub qos: bool,
 }
 
+/// Raise the soft fd limit so deep queues of open directories do not hit EMFILE.
+pub fn raise_fd_limit() {
+    unsafe {
+        let mut rl = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) == 0 {
+            let want = 10240.min(rl.rlim_max);
+            if rl.rlim_cur < want {
+                rl.rlim_cur = want;
+                libc::setrlimit(libc::RLIMIT_NOFILE, &rl);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod child_index_tests {
     use super::*;

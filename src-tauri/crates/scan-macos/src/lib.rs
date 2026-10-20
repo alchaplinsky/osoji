@@ -6,7 +6,9 @@
 
 mod watch;
 
-pub use watch::{Batch, Watcher};
+pub use scan_core::live::Batch;
+pub use scan_core::raise_fd_limit;
+pub use watch::Watcher;
 
 use crossbeam_deque::{Injector, Stealer, Worker};
 use scan_core::live::DirEntry;
@@ -551,20 +553,6 @@ pub fn disable_dataless_materialization() {
             IOPOL_SCOPE_PROCESS,
             IOPOL_MATERIALIZE_DATALESS_FILES_OFF,
         );
-    }
-}
-
-/// Raise the soft fd limit so deep queues of open directories do not hit EMFILE.
-pub fn raise_fd_limit() {
-    unsafe {
-        let mut rl = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) == 0 {
-            let want = 10240.min(rl.rlim_max);
-            if rl.rlim_cur < want {
-                rl.rlim_cur = want;
-                libc::setrlimit(libc::RLIMIT_NOFILE, &rl);
-            }
-        }
     }
 }
 

@@ -26,10 +26,10 @@
 //! `AppState.applying` throughout, so the watcher threads (two while a new scan replaces the old)
 //! and the drain never interleave phases.
 
+use crate::platform::{self, Watcher};
 use crate::{ancestors_of, find_node, home_path, unix_now, AppState, Scan};
-use scan_core::live::{graft, is_gone, reconcile, DirEntry, Hardlinks};
+use scan_core::live::{graft, is_gone, reconcile, Batch, DirEntry, Hardlinks};
 use scan_core::{Arena, Cancel, Flags, HardlinkSet, NodeId, Progress, ScanConfig, NONE};
-use scan_macos::{Batch, Watcher};
 use scan_policy::PolicyContext;
 use serde::Serialize;
 use std::io;
@@ -406,7 +406,7 @@ fn vanish(scan: &mut Scan, dir: NodeId) -> Option<NodeId> {
 /// None when the directory is there but cannot be listed: a partial listing would drop the
 /// entries it missed.
 fn list(path: &Path) -> Option<Read<Vec<DirEntry>>> {
-    match scan_macos::list_dir(path) {
+    match platform::list_dir(path) {
         Ok(listing) => Some(Read::Found(listing)),
         Err(e) if vanished(&e) => Some(Read::Gone),
         Err(e) => {
@@ -437,7 +437,7 @@ fn vanished(e: &io::Error) -> bool {
 fn walk(path: &Path) -> Option<Tree> {
     let cfg = ScanConfig { root: path.to_path_buf(), threads: WALK_THREADS, cross_mounts: false, qos: false };
     let links = HardlinkSet::default();
-    match scan_macos::walk(&cfg, &Progress::default(), &Cancel::new(false), &links) {
+    match platform::walk(&cfg, &Progress::default(), &Cancel::new(false), &links) {
         Ok(sub) if !sub.flags[0].contains(Flags::ERROR) => Some((sub, links.finish())),
         Ok(_) => {
             log::warn!("live: can't read {}", path.display());
