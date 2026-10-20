@@ -1,11 +1,12 @@
 name: Release
 
 # Manual only. Bump `version` in src-tauri/tauri.conf.json, src-tauri/Cargo.toml
-# ([workspace.package]) and package.json before running. This builds, signs, and
-# notarizes a universal macOS app and creates a PUBLISHED GitHub release with
-# the .dmg, the updater artifact (.app.tar.gz + .sig), and latest.json.
-# Publishing makes it available to the in-app auto-updater, which reads
-# latest.json straight from the public release (see docs/RELEASING.md).
+# ([workspace.package]) and package.json before running — `scripts/check-version.sh`
+# asserts they agree, in CI and again as the first step below. This builds,
+# signs, and notarizes a universal macOS app and creates a PUBLISHED GitHub
+# release with the .dmg, the updater artifact (.app.tar.gz + .sig), and
+# latest.json. Publishing makes it available to the in-app auto-updater, which
+# reads latest.json straight from the public release (see docs/RELEASING.md).
 on:
   workflow_dispatch:
 
@@ -16,6 +17,11 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Fail here, not after a 20-minute build: a tag derived from tauri.conf.json
+      # wrapping a binary that reports another version is not a release.
+      - name: Version sync
+        run: ./scripts/check-version.sh
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2

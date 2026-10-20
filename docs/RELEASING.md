@@ -28,16 +28,17 @@ bump version → run Release workflow (manual) → CI builds/signs/notarizes
 A minisign keypair signs every update artifact; the app verifies it with the
 public key embedded in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`).
 
-Generate one (keep the private key **outside** the repo):
+A keypair was generated for Osoji and the **public** key is already committed.
+The **private** key lives outside the repo at `~/.tauri/osoji.key`. To
+regenerate (e.g. to set a password), run:
 
 ```sh
 bun run tauri signer generate -w ~/.tauri/osoji.key
 ```
 
-Then paste the contents of `~/.tauri/osoji.key.pub` into
-`plugins.updater.pubkey` in `tauri.conf.json`. **If you lose the private key,
-existing installs can no longer auto-update** — they'd need a fresh manual
-install.
+Then update `plugins.updater.pubkey` in `tauri.conf.json` with the new
+`~/.tauri/osoji.key.pub` contents. **If you lose the private key, existing
+installs can no longer auto-update** — they'd need a fresh manual install.
 
 ### 2. GitHub repository secrets
 
@@ -59,12 +60,18 @@ the same developer account, copy them over.
 
 ## Per-release procedure
 
-1. **Bump the version** in three files so they agree:
+1. **Bump the version** in three files so they agree. `scripts/check-version.sh`
+   asserts it, in CI on every PR and again as the first step of the Release
+   workflow, so a mismatch fails before anything is built:
    - `src-tauri/tauri.conf.json` → `version` — the authority: the release
      tag/name (`v__VERSION__`) comes from it, and it is what the updater
      compares against
-   - `src-tauri/Cargo.toml` → `[workspace.package] version`
+   - `src-tauri/Cargo.toml` → `[workspace.package] version` — every crate
+     inherits it, so it is what the binary reports
    - `package.json` → `version`
+
+   Run `./scripts/check-version.sh` before opening the PR: it prints the agreed
+   version, or names the file that disagrees.
 2. Merge that to `main`.
 3. Run the **Release** workflow: GitHub → Actions → *Release* → *Run workflow*.
 4. Wait for it to finish. It creates a **published** release `Osoji v<version>`
