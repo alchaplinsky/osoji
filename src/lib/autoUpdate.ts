@@ -87,7 +87,12 @@ export async function checkForUpdate(onProgress?: (progress: UpdateProgress) => 
  */
 export async function runStartupUpdateCheck(onStaged: (version: string, notes: string | null) => void): Promise<void> {
   if (import.meta.env.DEV) return;
-  if (!(await updaterAvailable())) return;
+  // A failed probe counts as "cannot update": this runs fire-and-forget at startup and must never reject.
+  const available = await updaterAvailable().catch((err: unknown) => {
+    console.warn("Updater availability check failed:", err);
+    return false;
+  });
+  if (!available) return;
 
   const result = await checkForUpdate();
   if (result.kind === "staged") onStaged(result.version, result.notes);

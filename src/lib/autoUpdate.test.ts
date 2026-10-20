@@ -84,6 +84,16 @@ describe("runStartupUpdateCheck", () => {
     expect(onStaged).not.toHaveBeenCalled();
   });
 
+  test("treats a failed availability probe as unavailable instead of rejecting", async () => {
+    updaterAvailable.mockRejectedValue(new Error("no such command"));
+    const onStaged = vi.fn();
+
+    await expect(runStartupUpdateCheck(onStaged)).resolves.toBeUndefined();
+
+    expect(check).not.toHaveBeenCalled();
+    expect(onStaged).not.toHaveBeenCalled();
+  });
+
   test("checks when the install can update itself", async () => {
     updaterAvailable.mockResolvedValue(true);
     check.mockResolvedValue(null);
