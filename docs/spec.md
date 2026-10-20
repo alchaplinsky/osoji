@@ -167,5 +167,5 @@ names: utf8 blob
 - M4: mmap snapshot, FSEvents, mtime fallback and TCC handling.
 - M5: cleanup rules, collector, trash and compare.
 - M6: clone accounting.
-- M7: Linux.
+- M7: Linux. Done: the platform seam (`src-tauri/src/platform`), the jwalk walker with progress, the inotify watcher in `scan-linux` (falls back to a view that does not follow changes when `max_user_watches` is hit), real volumes from `/proc/self/mounts`, the cleanup policy in `policy/linux.toml`, and AppImage + .deb bundles from the release workflow (only the AppImage updates itself). To come: the getdents64/statx walker.
 - M8: Windows, including MFT.

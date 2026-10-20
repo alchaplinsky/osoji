@@ -152,6 +152,18 @@ bun tauri dev           # dev build with hot reload
 bun tauri build         # .app and .dmg under src-tauri/target/release/bundle
 ```
 
+#### Linux
+
+Osoji builds and runs on Linux: it scans with the portable `jwalk` walker, keeps the scan current through an inotify watcher, lists the real mounts, and has its own cleanup policy in [`src-tauri/crates/scan-policy/policy/linux.toml`](src-tauri/crates/scan-policy/policy/linux.toml). The native `getdents64`/`statx` walker is still to come. On Debian or Ubuntu, install the Tauri prerequisites first:
+
+```sh
+sudo apt-get install libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+bun tauri dev
+bun tauri build --bundles appimage,deb   # under src-tauri/target/release/bundle
+```
+
+The release workflow publishes an AppImage and a `.deb` for x86_64. Only the AppImage updates itself; a `.deb` install is updated by installing the next `.deb`.
+
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- USAGE -->
@@ -226,7 +238,7 @@ Releases are built, signed, notarized and published to GitHub Releases by the **
 - [ ] Privacy cleanup: browser history, cookies and recent-item lists
 - [ ] Cached snapshot for a first pixel in under 300 ms
 - [ ] Clone accounting (shared vs unique bytes on APFS)
-- [ ] Linux, then Windows
+- [ ] Linux, in progress: builds, scans with the `jwalk` walker, live updates through inotify, real volumes, a Linux cleanup policy, and ships as an AppImage and a `.deb`; the native `getdents64`/`statx` walker is still to come. Windows after that.
 
 See the [open issues](https://github.com/alchaplinsky/osoji/issues) for the full list and the [spec](docs/spec.md) for the design behind each milestone.
 
