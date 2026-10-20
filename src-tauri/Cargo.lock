@@ -2661,7 +2661,7 @@ dependencies = [
 
 [[package]]
 name = "osoji-app"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "libc",
  "log",
@@ -3265,7 +3265,7 @@ dependencies = [
 
 [[package]]
 name = "scan-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "clap",
  "libc",
@@ -3275,7 +3275,7 @@ dependencies = [
 
 [[package]]
 name = "scan-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bitflags 2.13.2",
  "jwalk",
@@ -3283,7 +3283,7 @@ dependencies = [
 
 [[package]]
 name = "scan-macos"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "crossbeam-deque",
  "fsevent-sys",
@@ -3293,7 +3293,7 @@ dependencies = [
 
 [[package]]
 name = "scan-policy"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "scan-core",
  "serde",
