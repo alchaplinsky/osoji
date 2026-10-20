@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = [".", "crates/scan-core", "crates/scan-macos", "crates/scan-cli", "crates/scan-policy"]
+members = [".", "crates/scan-core", "crates/scan-macos", "crates/scan-linux", "crates/scan-cli", "crates/scan-policy"]
 
 [workspace.package]
 edition = "2021"
@@ -61,3 +61,7 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSAnimationContext",
     "NSEvent",
 ] }
+
+# The inotify watcher, reached only through src/platform/linux.rs.
+[target.'cfg(target_os = "linux")'.dependencies]
+scan-linux = { path = "crates/scan-linux" }

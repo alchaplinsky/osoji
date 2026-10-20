@@ -1,0 +1,10 @@
+[package]
+name = "scan-linux"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+scan-core = { path = "../scan-core" }
+# inotify on Linux. The crate also builds on macOS (FSEvents backend) so `cargo check` on a
+# Mac covers it; the app only links it on Linux.
+notify = "8.2"
