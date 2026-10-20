@@ -55,6 +55,8 @@ export const fullDiskAccess = () => invoke<boolean>("full_disk_access");
 export const retryUnreadable = () => invoke<number>("retry_unreadable");
 export const openPrivacySettings = () => invoke<void>("open_privacy_settings");
 export const volumes = () => invoke<VolumeInfo[]>("volumes");
+/** The OS the backend was built for, as Rust's `std::env::consts::OS` names it ("macos", "linux"). */
+export const platform = () => invoke<string>("platform");
 
 export const onScanChanged = (handler: (e: ScanChanged) => void): Promise<UnlistenFn> =>
   listen<ScanChanged>("scan:changed", (e) => handler(e.payload));
