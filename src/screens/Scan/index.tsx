@@ -4,6 +4,7 @@ import { useSmoothed } from "../../hooks/useSmoothed";
 import type { ProgressMsg, ScanSummary } from "../../lib/api";
 import type { Volume } from "../../lib/types";
 import { humanBytes, humanCount, humanDuration } from "../../lib/format";
+import { isMac } from "../../lib/platform";
 import { scanFraction, type ScanExpectation } from "../../lib/scanEstimate";
 import { useTheme } from "../../hooks/useTheme";
 import { neutral, tone } from "../../design/palette";
@@ -136,7 +137,8 @@ export default function ScanScreen({ volume, scanRoot, rootLabel, status, progre
 
   return (
     <section className={styles.screen}>
-      <div className={styles.dragStrip} data-tauri-drag-region="deep" />
+      {/* Only macOS hides the title bar; elsewhere the OS draws a draggable one of its own. */}
+      {isMac() && <div className={styles.dragStrip} data-tauri-drag-region="deep" />}
       <ScanRing span={span} scanning={scanning} progress={fraction} value={centre.value} valueSize={centre.size} label={centre.label} />
       <div className={styles.title}>{titleFor(phase, rootLabel)}</div>
       <div className={styles.sub}>{subFor(phase, summary, error)}</div>
