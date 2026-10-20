@@ -14,6 +14,10 @@
 
 use crate::{Arena, ChildIndex, Flags, NodeId, NONE};
 use std::collections::{HashMap, HashSet};
+use std::io;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
 
 /// One entry of a directory listing, as a watcher re-reads it. Sizes are allocated bytes
 /// (`blocks * 512`), matching what the walkers record.
@@ -28,6 +32,79 @@ pub struct DirEntry {
     pub ino: u64,
     /// Link count; above 1 the entry shares its inode, and `Hardlinks` decides which node counts.
     pub nlink: u32,
+}
+
+/// Lists one directory the way the walkers record it: allocated sizes, directories at 0,
+/// symlinks not followed, mount points flagged `MOUNT`. Hard links are not deduplicated; a
+/// live listing has no scan-wide view of which link was seen first, so each counts as an
+/// ordinary file. An entry whose metadata cannot be read is flagged `ERROR` at size 0. Fails
+/// with `NotADirectory` when `path` itself is a symlink, so pass canonical paths.
+pub fn list_dir(path: &Path) -> io::Result<Vec<DirEntry>> {
+    let meta = std::fs::symlink_metadata(path)?;
+    if !meta.is_dir() {
+        return Err(io::Error::from(io::ErrorKind::NotADirectory));
+    }
+    let dev = meta.dev();
+    let mut out = Vec::new();
+    // A failed read mid-directory is an error for the whole listing: reconciling against a
+    // partial one would drop the entries it missed.
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        let mut flags = Flags::empty();
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            flags |= Flags::DIR;
+        } else if kind.is_symlink() {
+            flags |= Flags::SYMLINK;
+        }
+        let (size, mtime, dev, ino, nlink) = match entry.metadata() {
+            Ok(md) => {
+                if kind.is_dir() && md.dev() != dev {
+                    flags |= Flags::MOUNT;
+                }
+                let size = if kind.is_dir() { 0 } else { md.blocks() * 512 };
+                (size, md.mtime(), md.dev(), md.ino(), md.nlink() as u32)
+            }
+            Err(_) => {
+                flags |= Flags::ERROR;
+                (0, 0, 0, 0, 1)
+            }
+        };
+        out.push(DirEntry { name: entry.file_name().as_bytes().to_vec(), size, mtime, flags, dev, ino, nlink });
+    }
+    Ok(out)
+}
+
+/// One coalesced window of changes, every path inside the watched root.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Batch {
+    /// Directories whose listing must be re-read. Sorted, deduplicated.
+    pub dirs: Vec<PathBuf>,
+    /// Subtrees the watcher lost track of (coalesced or dropped events) that must be walked
+    /// again. Sorted, with subtrees of other entries removed.
+    pub rescan: Vec<PathBuf>,
+}
+
+impl Batch {
+    /// One batch standing for all of `batches`: a listing read for the merged batch sees the disk as
+    /// it is after every one of them, so applying it once is the same as applying each in turn.
+    pub fn merge(batches: impl IntoIterator<Item = Batch>) -> Batch {
+        let mut out = Batch::default();
+        for b in batches {
+            out.dirs.extend(b.dirs);
+            out.rescan.extend(b.rescan);
+        }
+        out.normalize();
+        out
+    }
+
+    pub fn normalize(&mut self) {
+        self.dirs.sort();
+        self.dirs.dedup();
+        // Path ordering is by component, so a subtree sorts directly after its root.
+        self.rescan.sort();
+        self.rescan.dedup_by(|later, earlier| later.starts_with(earlier));
+    }
 }
 
 /// Which scanned nodes share an inode (`nlink > 1`), and which of them carries the bytes.
@@ -754,6 +831,88 @@ mod tests {
         assert_eq!(carrier(&arena, &links, 13), node(&arena, "d/g"));
         assert_eq!(links.members(1, 7), [node(&arena, "a/x"), node(&arena, "d/e")]);
         assert_eq!(links.inode(node(&arena, "d/h")), Some((1, 13)));
+    }
+
+    fn paths(ps: &[&str]) -> Vec<PathBuf> {
+        ps.iter().map(PathBuf::from).collect()
+    }
+
+    #[test]
+    fn merge_folds_batches_into_one_normalized_batch() {
+        let batch = |dirs: &[&str], rescan: &[&str]| Batch { dirs: paths(dirs), rescan: paths(rescan) };
+        let merged = Batch::merge([
+            batch(&["/r/b", "/r/a"], &[]),
+            batch(&["/r/a"], &["/r/c/d"]),
+            batch(&[], &["/r/c"]),
+        ]);
+        assert_eq!(merged.dirs, paths(&["/r/a", "/r/b"]));
+        assert_eq!(merged.rescan, paths(&["/r/c"]));
+        assert_eq!(Batch::merge([]), Batch::default());
+    }
+
+    #[test]
+    fn list_dir_matches_the_walker() {
+        use crate::{Cancel, HardlinkSet, Progress, ScanConfig};
+        use std::collections::BTreeMap;
+        use std::fs;
+
+        // Canonical: the listing refuses a symlinked path and /var is one on macOS.
+        let root =
+            fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("osoji-core-list-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("sub")).unwrap();
+        let write = |path: &Path, bytes: usize| fs::write(path, vec![0xA5u8; bytes]).unwrap();
+        write(&root.join("sub/inner"), 4096);
+        write(&root.join("small"), 10);
+        write(&root.join("big"), 100_000);
+        fs::hard_link(root.join("big"), root.join("big-link")).unwrap();
+        std::os::unix::fs::symlink("sub", root.join("sym")).unwrap();
+
+        let cfg = ScanConfig { root: root.clone(), threads: 2, cross_mounts: false, qos: false };
+        let arena =
+            crate::jwalk_walker::walk(&cfg, &Progress::default(), &Cancel::new(false), &HardlinkSet::default()).unwrap();
+        let walked: BTreeMap<Vec<u8>, (u64, i64, Flags)> = arena
+            .children(0)
+            .map(|id| {
+                let i = id as usize;
+                // Directory sizes in the arena are aggregated; the walker records them as 0 itself.
+                let size = if arena.flags[i].contains(Flags::DIR) { 0 } else { arena.size[i] };
+                (arena.name(id).to_vec(), (size, arena.mtime[i], arena.flags[i]))
+            })
+            .collect();
+        let listed: BTreeMap<Vec<u8>, (u64, i64, Flags)> =
+            list_dir(&root).unwrap().into_iter().map(|e| (e.name, (e.size, e.mtime, e.flags))).collect();
+
+        assert_eq!(listed.keys().collect::<Vec<_>>(), walked.keys().collect::<Vec<_>>());
+        for (name, w) in &walked {
+            let l = listed[name];
+            if w.2.contains(Flags::HARDLINK_DUP) {
+                // The walker zeroes the second link it meets; a listing counts both in full.
+                assert_eq!(l.0, listed[&b"big"[..]].0);
+                assert_eq!(l.2, w.2 - Flags::HARDLINK_DUP);
+            } else {
+                assert_eq!(&l, w, "{}", String::from_utf8_lossy(name));
+            }
+        }
+        let walked_ids: BTreeMap<Vec<u8>, (u32, u64)> = arena
+            .children(0)
+            .map(|id| (arena.name(id).to_vec(), (arena.dev[id as usize], arena.ino[id as usize])))
+            .collect();
+        // The arena keeps dev as u32, the listing as u64.
+        let listed_ids: BTreeMap<Vec<u8>, (u32, u64)> =
+            list_dir(&root).unwrap().into_iter().map(|e| (e.name, (e.dev as u32, e.ino))).collect();
+        assert_eq!(listed_ids, walked_ids);
+        assert!(walked_ids.values().all(|&(_, ino)| ino != 0));
+        assert_eq!(walked_ids[&b"big"[..]], walked_ids[&b"big-link"[..]]);
+
+        assert!(listed[&b"big"[..]].0 >= 100_000);
+        assert!(listed[&b"sub"[..]].2.contains(Flags::DIR));
+        assert!(listed[&b"sym"[..]].2.contains(Flags::SYMLINK));
+
+        assert!(list_dir(&root.join("sym")).is_err(), "must not follow a symlinked directory path");
+        assert!(list_dir(&root.join("missing")).is_err());
+
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

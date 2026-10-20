@@ -6,16 +6,23 @@ use std::time::Instant;
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
 enum Walker {
+    /// getattrlistbulk; macOS only.
+    #[cfg(target_os = "macos")]
     Bulk,
     Jwalk,
 }
+
+#[cfg(target_os = "macos")]
+const DEFAULT_WALKER: Walker = Walker::Bulk;
+#[cfg(not(target_os = "macos"))]
+const DEFAULT_WALKER: Walker = Walker::Jwalk;
 
 #[derive(Parser, Debug)]
 #[command(about = "Headless disk scanner for benchmarks")]
 struct Args {
     /// Directory to scan
     root: PathBuf,
-    #[arg(long, value_enum, default_value_t = Walker::Bulk)]
+    #[arg(long, value_enum, default_value_t = DEFAULT_WALKER)]
     walker: Walker,
     /// Worker threads (default: min(cores, 8))
     #[arg(long)]
@@ -89,13 +96,15 @@ fn main() {
         args.threads.unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8));
     let cfg = ScanConfig { root: args.root.clone(), threads, cross_mounts: args.cross_mounts, qos: !args.no_qos };
 
+    #[cfg(target_os = "macos")]
     scan_macos::disable_dataless_materialization();
-    scan_macos::raise_fd_limit();
+    scan_core::raise_fd_limit();
 
     let progress = Progress::default();
     let cancel = AtomicBool::new(false);
     let t0 = Instant::now();
     let result = match args.walker {
+        #[cfg(target_os = "macos")]
         Walker::Bulk => scan_macos::walk(&cfg, &progress, &cancel, &scan_core::HardlinkSet::default()),
         Walker::Jwalk => scan_core::jwalk_walker::walk(&cfg, &progress, &cancel, &scan_core::HardlinkSet::default()),
     };

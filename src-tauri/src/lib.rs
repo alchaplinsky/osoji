@@ -2,16 +2,17 @@
 //! The arena never crosses IPC; commands return only what is on screen.
 
 mod live;
+mod platform;
 #[cfg(target_os = "macos")]
 mod zoom;
 
-use scan_core::live::{detach, is_gone, Detached, Hardlinks};
+use scan_core::live::{detach, is_gone, Batch, Detached, Hardlinks};
 use scan_core::{Arena, Cancel, ChildIndex, Flags, HardlinkSet, NodeId, Progress, ScanConfig, NONE};
 use scan_policy::{covering, Kind, Policy, PolicyContext, PolicyHits, Safety, POLICY_FLAGS};
 use serde::Serialize;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashSet};
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -59,9 +60,9 @@ struct AppState {
     generation: AtomicU64,
     sweeping: AtomicBool,
     /// Keeps `scan` current with the disk; replaced along with it.
-    watcher: Mutex<Option<scan_macos::Watcher>>,
+    watcher: Mutex<Option<platform::Watcher>>,
     /// Watcher batches held back while a scan runs, applied once its result is in place.
-    pending: Mutex<Option<Vec<scan_macos::Batch>>>,
+    pending: Mutex<Option<Vec<Batch>>>,
     /// The last scan's wind-down (retiring its predecessor's watcher, applying `pending`), which
     /// runs after the scan command returns; the next scan waits for it before queueing anew.
     settling: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
@@ -323,7 +324,7 @@ async fn scan(
     root: String,
     threads: Option<usize>,
     on_progress: Channel<ProgressMsg>,
-) -> (Result<ScanSummary, String>, Option<scan_macos::Watcher>) {
+) -> (Result<ScanSummary, String>, Option<platform::Watcher>) {
     let canonical = match resolve_root(&root) {
         Ok(canonical) => canonical,
         Err(e) => return (Err(e), None),
@@ -378,7 +379,7 @@ async fn scan(
         let (cfg, progress, cancel) = (cfg.clone(), progress.clone(), cancel.clone());
         tauri::async_runtime::spawn_blocking(move || {
             let links = HardlinkSet::default();
-            scan_macos::walk(&cfg, &progress, &cancel, &links).map(|arena| (arena, links.finish()))
+            platform::walk(&cfg, &progress, &cancel, &links).map(|arena| (arena, links.finish()))
         })
         .await
     };
@@ -604,9 +605,7 @@ fn collect_suggestions(policy: &Policy, scan: &Scan, ctx: &PolicyContext) -> Vec
             let parent = a.parent[id as usize];
             let (safety, reason) = match &entry.guard {
                 Some(g) if g.kind == Kind::Protected.as_str() => ("keep", g.reason.clone()),
-                _ if parent != NONE && !is_writable(&a.path(parent)) => {
-                    ("keep", "Protected by macOS and cannot be moved by Osoji.".to_string())
-                }
+                _ if parent != NONE && !is_writable(&a.path(parent)) => ("keep", platform::PROTECTED_BY_OS.to_string()),
                 _ => (policy.rule(rule).safety.unwrap_or(Safety::Review).as_str(), policy.reason_for(rule, a, id, ctx)),
             };
             Suggestion { entry, safety, reason }
@@ -688,7 +687,7 @@ async fn reveal(app: tauri::AppHandle, node: NodeId) -> Result<(), String> {
         Ok(scan.arena.path(node))
     })
     .await??;
-    std::process::Command::new("open").arg("-R").arg(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
+    platform::reveal(&path)
 }
 
 fn has_ancestor(a: &Arena, id: NodeId, ancestor: NodeId) -> bool {
@@ -887,7 +886,7 @@ async fn trash_info(app: tauri::AppHandle) -> Result<Option<TrashInfo>, String> 
 
 #[tauri::command]
 fn show_trash() -> Result<(), String> {
-    std::process::Command::new("open").arg(home_path().join(".Trash")).spawn().map(|_| ()).map_err(|e| e.to_string())
+    platform::show_trash(&home_path())
 }
 
 #[tauri::command]
@@ -895,90 +894,19 @@ fn home_dir() -> String {
     std::env::var("HOME").unwrap_or_else(|_| "/".into())
 }
 
-#[derive(Serialize)]
-struct VolumeInfo {
-    name: String,
-    mount: String,
-    total: u64,
-    free: u64,
+#[tauri::command]
+fn volume_info(path: String) -> Result<platform::VolumeInfo, String> {
+    platform::volume_info(&path)
 }
 
 #[tauri::command]
-fn volume_info(path: String) -> Result<VolumeInfo, String> {
-    let c = CString::new(path).map_err(|e| e.to_string())?;
-    let mut st: libc::statfs = unsafe { std::mem::zeroed() };
-    if unsafe { libc::statfs(c.as_ptr(), &mut st) } != 0 {
-        return Err(std::io::Error::last_os_error().to_string());
-    }
-    Ok(volume_from(&st))
+fn volumes() -> Result<Vec<platform::VolumeInfo>, String> {
+    platform::volumes()
 }
 
-/// User-visible local volumes: the boot disk at `/` plus whatever is mounted under
-/// `/Volumes`. That prefix already leaves out `/dev` and the read-only system volumes
-/// under `/System/Volumes`, including the boot disk's Data volume, which `/` stands for.
-#[tauri::command]
-fn volumes() -> Result<Vec<VolumeInfo>, String> {
-    let mut buf: *mut libc::statfs = std::ptr::null_mut();
-    let n = unsafe { libc::getmntinfo(&mut buf, libc::MNT_NOWAIT) };
-    if n <= 0 {
-        return Err(std::io::Error::last_os_error().to_string());
-    }
-    // getmntinfo owns the buffer and reuses it on the next call; copy out before returning.
-    let mounts = unsafe { std::slice::from_raw_parts(buf, n as usize) };
-    let mut out: Vec<VolumeInfo> = mounts
-        .iter()
-        .filter(|st| {
-            let flags = st.f_flags as libc::c_int;
-            let mount = unsafe { CStr::from_ptr(st.f_mntonname.as_ptr()) }.to_bytes();
-            flags & libc::MNT_LOCAL != 0
-                && flags & libc::MNT_DONTBROWSE == 0
-                && (mount == b"/" || mount.starts_with(b"/Volumes/"))
-        })
-        .map(volume_from)
-        .collect();
-    out.sort_by(|a, b| (a.mount != "/").cmp(&(b.mount != "/")).then_with(|| a.name.cmp(&b.name)));
-    Ok(out)
-}
-
-fn volume_from(st: &libc::statfs) -> VolumeInfo {
-    let mount = unsafe { CStr::from_ptr(st.f_mntonname.as_ptr()) }.to_string_lossy().into_owned();
-    let bsize = u64::from(st.f_bsize);
-    VolumeInfo { name: volume_name(&mount), total: st.f_blocks * bsize, free: st.f_bavail * bsize, mount }
-}
-
-/// `/Volumes` holds the user-visible names; the boot volume is a symlink to `/`.
-/// The boot disk's Data volume (home folders live there) shares the boot disk's name.
-fn volume_name(mount: &str) -> String {
-    let target = Path::new(if mount == "/System/Volumes/Data" { "/" } else { mount });
-    let listed = std::fs::read_dir("/Volumes").ok().and_then(|entries| {
-        entries
-            .flatten()
-            .find(|e| std::fs::canonicalize(e.path()).is_ok_and(|p| p == target))
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-    });
-    listed.unwrap_or_else(|| match target.file_name() {
-        Some(n) => n.to_string_lossy().into_owned(),
-        None => "Startup Disk".into(),
-    })
-}
-
-/// Folders under `$HOME` that macOS only lets an app list once it has Full Disk Access.
-const TCC_PROBES: [&str; 3] = ["Library/Mail", "Library/Safari", "Library/Messages"];
-const PRIVACY_ALL_FILES_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
-
-/// Granted when any protected folder that exists can be listed; with none present there is nothing to block.
 #[tauri::command]
 fn full_disk_access() -> bool {
-    let home = PathBuf::from(home_dir());
-    let mut denied = false;
-    for dir in TCC_PROBES.map(|p| home.join(p)) {
-        match std::fs::read_dir(&dir) {
-            Ok(_) => return true,
-            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => denied = true,
-            Err(_) => {}
-        }
-    }
-    !denied
+    platform::full_disk_access(&PathBuf::from(home_dir()))
 }
 
 /// After Full Disk Access was granted: bring in the folders the last scan could not read, without
@@ -991,16 +919,35 @@ async fn retry_unreadable(app: tauri::AppHandle) -> Result<usize, String> {
 
 #[tauri::command]
 fn open_privacy_settings() -> Result<(), String> {
-    std::process::Command::new("open").arg(PRIVACY_ALL_FILES_URL).spawn().map(|_| ()).map_err(|e| e.to_string())
+    platform::open_privacy_settings()
+}
+
+/// The OS this build runs on, as `std::env::consts::OS` names it ("macos", "linux").
+#[tauri::command]
+fn platform() -> &'static str {
+    std::env::consts::OS
 }
 
 /// The log file rolls over past this, keeping one previous file; the plugin's 40 KB default fills
 /// in a session on a busy disk.
 const LOG_FILE_BYTES: u128 = 1 << 20;
 
+/// Double-click on a drag region zooms the window; route that zoom through the animator so the
+/// page follows the frame instead of freezing (zoom.rs).
+#[cfg(target_os = "macos")]
+fn install_zoom(app: &tauri::App) {
+    match app.get_webview_window("main").map(|w| w.ns_window()) {
+        Some(Ok(ns_window)) => zoom::install(ns_window),
+        Some(Err(e)) => log::warn!("zoom: no NSWindow for main ({e}); zoom stays native"),
+        None => log::warn!("zoom: no main window at setup; zoom stays native"),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_zoom(_app: &tauri::App) {}
+
 pub fn run() {
-    scan_macos::disable_dataless_materialization();
-    scan_macos::raise_fd_limit();
+    platform::init();
     let policy = Policy::for_current_os().unwrap_or_else(|e| panic!("bundled {e}"));
     // Warnings and errors go to stdout and to ~/Library/Logs/dev.osoji.app/, so a release build
     // launched from Finder, whose stderr goes nowhere, still leaves a file a user can send.
@@ -1015,16 +962,7 @@ pub fn run() {
     builder
         .manage(AppState { policy, ..AppState::default() })
         .setup(|app| {
-            // Double-click on a drag region zooms the window; route that zoom through the
-            // animator so the page follows the frame instead of freezing (zoom.rs).
-            #[cfg(target_os = "macos")]
-            {
-                match app.get_webview_window("main").map(|w| w.ns_window()) {
-                    Some(Ok(ns_window)) => zoom::install(ns_window),
-                    Some(Err(e)) => log::warn!("zoom: no NSWindow for main ({e}); zoom stays native"),
-                    None => log::warn!("zoom: no main window at setup; zoom stays native"),
-                }
-            }
+            install_zoom(app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1044,7 +982,8 @@ pub fn run() {
             full_disk_access,
             retry_unreadable,
             open_privacy_settings,
-            volumes
+            volumes,
+            platform
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -1315,7 +1254,7 @@ mod tests {
         assert_eq!(root, fs::canonicalize(base.join("real")).unwrap());
         let cfg = ScanConfig { root: root.clone(), threads: 2, cross_mounts: false, qos: false };
         let links = HardlinkSet::default();
-        let arena = scan_macos::walk(&cfg, &Progress::default(), &Cancel::new(false), &links).unwrap();
+        let arena = platform::walk(&cfg, &Progress::default(), &Cancel::new(false), &links).unwrap();
         let index = ChildIndex::build(&arena);
         let scan = Scan { root, arena, index, hits: PolicyHits::default(), links: links.finish(), epoch: 0 };
 
@@ -1344,7 +1283,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    // The suggestion tests below exercise the bundled macOS policy; the Linux one is empty so far.
+
     /// Stamp `arena` with the bundled policy, as a finished scan does, and collect its suggestions.
+    #[cfg(target_os = "macos")]
     fn suggest(root: &Path, mut arena: Arena, home: &Path, now: i64) -> Vec<Suggestion> {
         let policy = Policy::for_current_os().unwrap();
         let index = ChildIndex::build(&arena);
@@ -1354,11 +1296,13 @@ mod tests {
         collect_suggestions(&policy, &scan, &ctx)
     }
 
+    #[cfg(target_os = "macos")]
     fn by_name<'a>(found: &'a [Suggestion], name: &str) -> Option<&'a Suggestion> {
         found.iter().find(|s| s.entry.name == name)
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn suggests_each_app_cache_but_not_the_caches_folder() {
         // Real directories, so the writability guard sees writable parents.
         let base = std::env::temp_dir().join(format!("osoji-caches-{}", std::process::id()));
@@ -1395,6 +1339,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn skips_var_folders_and_keeps_items_in_protected_directories() {
         let mut a = Arena::default();
         let root = a.push(NONE, b"/", 0, 0, Flags::DIR);
@@ -1410,10 +1355,11 @@ mod tests {
         assert!(by_name(&found, "folders").is_none());
         let docker = by_name(&found, "Docker.raw").expect("Docker.raw suggested");
         assert_eq!(docker.safety, "keep");
-        assert_eq!(docker.reason, "Protected by macOS and cannot be moved by Osoji.");
+        assert_eq!(docker.reason, platform::PROTECTED_BY_OS);
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn says_how_long_a_download_has_been_sitting_there() {
         const NOW: i64 = 1_700_000_000;
         let base = std::env::temp_dir().join(format!("osoji-downloads-{}", std::process::id()));
@@ -1438,6 +1384,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn lists_a_folder_once_and_nothing_inside_it_or_inside_a_bundle() {
         let base = std::env::temp_dir().join(format!("osoji-nested-{}", std::process::id()));
         std::fs::create_dir_all(base.join("app")).unwrap();
@@ -1464,6 +1411,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn notes_other_users_homes_without_offering_to_remove_them() {
         let mut a = Arena::default();
         let root = a.push(NONE, b"/", 0, 0, Flags::DIR);
@@ -1481,15 +1429,5 @@ mod tests {
         assert_eq!(bob.reason, "Another user account's home folder, or a leftover from one.");
         assert!(by_name(&found, "alex").is_none());
         assert!(by_name(&found, "Shared").is_none());
-    }
-
-    #[test]
-    fn lists_the_boot_volume_first() {
-        let list = volumes().unwrap();
-        let boot = &list[0];
-        assert_eq!(boot.mount, "/");
-        assert!(!boot.name.is_empty());
-        assert!(boot.total > 0);
-        assert!(list.iter().all(|v| v.mount == "/" || v.mount.starts_with("/Volumes/")));
     }
 }
