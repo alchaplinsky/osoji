@@ -1,10 +1,5 @@
 <a id="readme-top"></a>
 
-<!-- PROJECT SHIELDS -->
-[![Release][release-shield]][release-url]
-[![CI][ci-shield]][ci-url]
-[![macOS][macos-shield]][release-url]
-
 <!-- PROJECT LOGO -->
 <br />
 <div align="center">
@@ -21,6 +16,12 @@
     <br />
     <br />
     <a href="https://github.com/alchaplinsky/osoji/releases/latest"><strong>Download the latest release »</strong></a>
+    <br />
+    <br />
+    <!-- PROJECT SHIELDS -->
+    <a href="https://github.com/alchaplinsky/osoji/releases/latest"><img src="https://img.shields.io/github/v/release/alchaplinsky/osoji?style=for-the-badge" alt="Release"></a>
+    <a href="https://github.com/alchaplinsky/osoji/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/alchaplinsky/osoji/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
+    <a href="https://github.com/alchaplinsky/osoji/releases/latest"><img src="https://img.shields.io/badge/macOS-Apple%20Silicon%20%7C%20Intel-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS"></a>
     <br />
     <br />
     <a href="https://github.com/alchaplinsky/osoji/issues/new?labels=bug">Report a bug</a>
@@ -272,11 +273,6 @@ Osoji is open source. The licence file is on its way; until it lands, treat the 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- MARKDOWN LINKS & IMAGES -->
-[release-shield]: https://img.shields.io/github/v/release/alchaplinsky/osoji?style=for-the-badge
-[release-url]: https://github.com/alchaplinsky/osoji/releases/latest
-[ci-shield]: https://img.shields.io/github/actions/workflow/status/alchaplinsky/osoji/ci.yml?branch=main&style=for-the-badge&label=CI
-[ci-url]: https://github.com/alchaplinsky/osoji/actions/workflows/ci.yml
-[macos-shield]: https://img.shields.io/badge/macOS-Apple%20Silicon%20%7C%20Intel-000000?style=for-the-badge&logo=apple&logoColor=white
 [product-screenshot]: docs/assets/screenshot.png
 [Rust-badge]: https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white
 [Rust-url]: https://www.rust-lang.org
