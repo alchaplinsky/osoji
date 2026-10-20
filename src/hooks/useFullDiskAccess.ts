@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { fullDiskAccess, openPrivacySettings } from "../lib/api";
+import { isMac } from "../lib/platform";
 
 export type FullDiskAccess = {
   /** `null` until the first probe answers. */
@@ -10,12 +11,16 @@ export type FullDiskAccess = {
   openSettings: () => void;
 };
 
-/** Probes Full Disk Access on mount and again whenever the window regains focus, e.g. back from System Settings. */
+/**
+ * Probes Full Disk Access on mount and again whenever the window regains focus, e.g. back from
+ * System Settings. Full Disk Access is a macOS concept: elsewhere it counts as granted, unprobed.
+ */
 export function useFullDiskAccess(): FullDiskAccess {
-  const [granted, setGranted] = useState<boolean | null>(null);
+  const [granted, setGranted] = useState<boolean | null>(isMac() ? null : true);
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
+    if (!isMac()) return;
     let active = true;
     const probe = () => {
       fullDiskAccess()

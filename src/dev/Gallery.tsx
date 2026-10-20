@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { isLayout, isTheme, LAYOUT_NAMES, LAYOUTS, THEME_NAMES, THEMES } from "../design/theme";
 import { STOPS, neutral, tone } from "../design/palette";
 import { useTheme } from "../hooks/useTheme";
+import { fileManager, modHint } from "../lib/platform";
 import {
   Badge, Button, Card, Checkbox, Eyebrow, Icon, IconButton, Menu, Mono, Panel, ProgressBar,
   SegmentedControl, Sheet, StatTile, Toast, Toggle, type IconName,
@@ -79,9 +80,9 @@ function Primitives() {
             open={menu}
             onClose={() => setMenu(false)}
             items={[
-              { label: "Scan again", hint: "⌘R", onSelect: () => {} },
-              { label: "Show hidden items", hint: "⌘⇧.", onSelect: () => {} },
-              { label: "Reveal in Finder", hint: "⌘⏎", onSelect: () => {} },
+              { label: "Scan again", hint: modHint("R"), onSelect: () => {} },
+              { label: "Show hidden items", hint: modHint("Shift+."), onSelect: () => {} },
+              { label: `Reveal in ${fileManager()}`, hint: modHint("Enter"), onSelect: () => {} },
               { label: "Export report…", onSelect: () => {} },
             ]}
           />

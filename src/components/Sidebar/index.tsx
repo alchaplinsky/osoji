@@ -1,4 +1,5 @@
 import type { TrashInfo } from "../../lib/api";
+import { isMac } from "../../lib/platform";
 import type { Screen, Volume } from "../../lib/types";
 import DiskCard, { type RootChoice } from "./DiskCard";
 import NavItem from "./NavItem";
@@ -35,7 +36,8 @@ export default function Sidebar({ volume, volumes, scanRoot, home, rootPickerDis
 
   return (
     <aside className={styles.sidebar}>
-      <div className={styles.top} data-tauri-drag-region="deep" />
+      {/* Only macOS draws the traffic lights over the content; elsewhere the OS title bar sits above it. */}
+      {isMac() && <div className={styles.top} data-tauri-drag-region="deep" />}
 
       <DiskCard volume={volume} volumes={volumes} scanRoot={scanRoot} home={home} disabled={rootPickerDisabled} onPickRoot={onPickRoot} />
       {trash && trash.size > 0 && <TrashLine trash={trash} />}

@@ -8,19 +8,24 @@ import App from "./App";
 import Gallery from "./dev/Gallery";
 import { ThemeProvider } from "./hooks/useTheme";
 import { SettingsProvider } from "./hooks/useSettings";
+import { loadPlatform } from "./lib/platform";
 import { revealWindow } from "./lib/window";
 
 const gallery = new URLSearchParams(location.search).get("gallery");
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <ThemeProvider>
-      <SettingsProvider>{gallery === null ? <App /> : <Gallery section={gallery} />}</SettingsProvider>
-    </ThemeProvider>
-  </React.StrictMode>,
-);
+// Components read the platform synchronously, so it is known before anything renders.
+// `loadPlatform` never rejects, so startup cannot stall on it.
+loadPlatform().then(() => {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <ThemeProvider>
+        <SettingsProvider>{gallery === null ? <App /> : <Gallery section={gallery} />}</SettingsProvider>
+      </ThemeProvider>
+    </React.StrictMode>,
+  );
 
-// The window starts hidden; show it once the first frame exists. Called
-// unconditionally right after render so a failure elsewhere can't leave the
-// app with a window that never appears.
-revealWindow();
+  // The window starts hidden; show it once the first frame exists. Called
+  // unconditionally right after render so a failure elsewhere can't leave the
+  // app with a window that never appears.
+  revealWindow();
+});

@@ -18,7 +18,7 @@ import { useBin } from "./hooks/useBin";
 import { useTheme } from "./hooks/useTheme";
 import { useSettings } from "./hooks/useSettings";
 import { useFullDiskAccess } from "./hooks/useFullDiskAccess";
-import { useShortcuts } from "./hooks/useShortcuts";
+import { modCombo, useShortcuts } from "./hooks/useShortcuts";
 import { useLiveScan } from "./hooks/useLiveScan";
 import { useItemMenu } from "./hooks/useItemMenu";
 import { useAutoUpdate } from "./hooks/useAutoUpdate";
@@ -298,10 +298,10 @@ export default function App() {
 
   useShortcuts(
     {
-      "Meta+r": () => {
+      [modCombo("r")]: () => {
         if (scan.status !== "scanning" && !sweeping) startScan();
       },
-      "Meta+Enter": () => {
+      [modCombo("Enter")]: () => {
         if (active === "breakdown") reveal(explorer.currentId).catch(console.error);
       },
     },

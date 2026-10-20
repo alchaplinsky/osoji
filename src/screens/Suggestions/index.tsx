@@ -4,6 +4,7 @@ import { Button, Mono } from "../../components/ui";
 import { toBinItem } from "../../lib/bin";
 import type { OpenItemMenu } from "../../hooks/useItemMenu";
 import { humanBytes } from "../../lib/format";
+import { isMac } from "../../lib/platform";
 import type { BinItem, Safety, Suggestion } from "../../lib/types";
 import BinBar from "../Breakdown/BinBar";
 import SuggestionGroup from "./SuggestionGroup";
@@ -21,10 +22,11 @@ type SuggestionsScreenProps = {
   onItemMenu?: OpenItemMenu;
 };
 
-const GROUPS: { safety: Safety; title: string; desc: string }[] = [
+/** A function, not a constant: the platform is only known once the app has started. */
+const groups = (): { safety: Safety; title: string; desc: string }[] => [
   { safety: "safe", title: "Safe to remove", desc: "Rebuilt automatically or already installed elsewhere" },
   { safety: "review", title: "Worth a look", desc: "Probably fine to remove, but only you can say" },
-  { safety: "keep", title: "We would keep these", desc: "Personal or managed by macOS" },
+  { safety: "keep", title: "We would keep these", desc: `Personal or managed by ${isMac() ? "macOS" : "the system"}` },
   { safety: "unexpected", title: "Worth knowing", desc: "Usually not there. Nothing to remove, just something to look at." },
 ];
 
@@ -78,7 +80,7 @@ export default function SuggestionsScreen({
               Safe items are rebuilt automatically or already live somewhere else. Items worth a look are probably fine to remove, but
               only you can say for sure.
             </div>
-            {GROUPS.map(
+            {groups().map(
               (g) =>
                 bySafety[g.safety].length > 0 && (
                   <SuggestionGroup key={g.safety} {...g} items={bySafety[g.safety]} binIds={binIds} onToggleBin={onToggleBin} onItemMenu={onItemMenu} />
