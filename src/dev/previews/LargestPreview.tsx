@@ -2,9 +2,8 @@ import { useMemo, useState } from "react";
 import LargestScreen from "../../screens/Largest";
 import type { BinItem, FileEntry } from "../../lib/types";
 import { toBinItem } from "../../lib/bin";
+import { GB } from "../../lib/format";
 import styles from "./LargestPreview.module.css";
-
-const GB = 2 ** 30;
 const MONTH = 30.44 * 86_400;
 const NOW = Math.floor(Date.now() / 1000);
 

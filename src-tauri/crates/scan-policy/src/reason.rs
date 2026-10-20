@@ -22,12 +22,13 @@ pub(crate) fn span(days: i64) -> String {
     }
 }
 
-/// Sizes the way the UI prints them: "512 B", "1.50 GB", "12.3 GB".
+/// Sizes the way the UI prints them: "512 B", "1.50 GB", "12.3 GB". Decimal units, as Finder
+/// shows them, and as `humanBytes` in the frontend does.
 pub(crate) fn human_size(bytes: u64) -> String {
     let mut v = bytes as f64;
     let mut i = 0;
-    while v >= 1024.0 && i < UNITS.len() - 1 {
-        v /= 1024.0;
+    while v >= 1000.0 && i < UNITS.len() - 1 {
+        v /= 1000.0;
         i += 1;
     }
     match i {

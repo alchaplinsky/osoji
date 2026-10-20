@@ -4,17 +4,17 @@ import Toolbar, { ToolbarTitle } from "../../components/Toolbar";
 import { Button } from "../../components/ui";
 import type { ScanStatus } from "../../hooks/useScan";
 import type { ProgressMsg, ScanSummary } from "../../lib/api";
+import { GB } from "../../lib/format";
 import { expectedScan } from "../../lib/scanEstimate";
 import type { Screen, Volume } from "../../lib/types";
 import ScanScreen, { SCAN_SETTLE_MS } from "../../screens/Scan";
 import SettingsScreen from "../../screens/Settings";
 import styles from "./ShellPreview.module.css";
 
-const GB = 1024 ** 3;
 const HOME = "/Users/alex";
-const VOLUME: Volume = { name: "Macintosh HD", mount: "/", total: 1024 * GB, free: 412 * GB };
+const VOLUME: Volume = { name: "Macintosh HD", mount: "/", total: 994.7 * GB, free: 412 * GB };
 const USED = VOLUME.total - VOLUME.free;
-const VOLUMES: Volume[] = [VOLUME, { name: "Backup", mount: "/Volumes/Backup", total: 2048 * GB, free: 1310 * GB }];
+const VOLUMES: Volume[] = [VOLUME, { name: "Backup", mount: "/Volumes/Backup", total: 2000 * GB, free: 1310 * GB }];
 const rootFor = (choice: RootChoice) =>
   choice.kind === "volume" ? choice.mount : choice.kind === "home" ? HOME : `${HOME}/Downloads`;
 const STATUSES: ScanStatus[] = ["idle", "scanning", "done", "stopped", "error"];

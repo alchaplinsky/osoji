@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { watchStatus, type WatchHit } from "../lib/api";
+import { GB } from "../lib/format";
 import type { Watcher, WatcherStatus } from "../lib/types";
 
 const STORAGE_KEY = "osoji.watchers";
+/** Limits were stored as whole gibibytes before sizes went decimal; a stored multiple of this is one of those. */
+const LEGACY_GB = 2 ** 30;
 
-export const DEFAULT_WATCH_LIMIT = 10 * 2 ** 30;
+export const DEFAULT_WATCH_LIMIT = 10 * GB;
 
 export type Watchers = {
   watchers: Watcher[];
@@ -25,7 +28,10 @@ function isWatcher(v: unknown): v is Watcher {
 function load(): Watcher[] {
   try {
     const stored: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
-    return Array.isArray(stored) ? stored.filter(isWatcher) : [];
+    if (!Array.isArray(stored)) return [];
+    return stored
+      .filter(isWatcher)
+      .map((w) => (Number.isInteger(w.limit / LEGACY_GB) ? { ...w, limit: (w.limit / LEGACY_GB) * GB } : w));
   } catch {
     return [];
   }

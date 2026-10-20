@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
+import { GB } from "./format";
 import { expectedScan, scanFraction, type ScanExpectation } from "./scanEstimate";
 import type { Volume } from "./types";
 
-const GB = 1024 ** 3;
 const volume: Volume = { name: "Macintosh HD", mount: "/", total: 1000 * GB, free: 400 * GB };
 const found = (bytes: number, entries: number) => ({ bytes, files: entries - 1, dirs: 1 });
 

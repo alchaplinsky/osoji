@@ -34,11 +34,13 @@ struct Args {
     json: bool,
 }
 
+/// Peak resident set in decimal megabytes, the unit every other size here uses. macOS reports
+/// `ru_maxrss` in bytes.
 fn max_rss_mb() -> f64 {
     unsafe {
         let mut ru: libc::rusage = std::mem::zeroed();
         libc::getrusage(libc::RUSAGE_SELF, &mut ru);
-        ru.ru_maxrss as f64 / (1024.0 * 1024.0)
+        ru.ru_maxrss as f64 / 1_000_000.0
     }
 }
 
@@ -46,8 +48,8 @@ fn human(bytes: u64) -> String {
     const U: [&str; 6] = ["B", "KB", "MB", "GB", "TB", "PB"];
     let mut v = bytes as f64;
     let mut i = 0;
-    while v >= 1024.0 && i < U.len() - 1 {
-        v /= 1024.0;
+    while v >= 1000.0 && i < U.len() - 1 {
+        v /= 1000.0;
         i += 1;
     }
     if i == 0 {

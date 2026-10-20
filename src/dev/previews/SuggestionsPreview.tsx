@@ -2,10 +2,9 @@ import { useEffect } from "react";
 import SuggestionsScreen from "../../screens/Suggestions";
 import { useBin } from "../../hooks/useBin";
 import { toBinItem } from "../../lib/bin";
+import { GB } from "../../lib/format";
 import type { Safety, Suggestion } from "../../lib/types";
 import styles from "./BreakdownPreview.module.css";
-
-const GB = 2 ** 30;
 const DAY = 86_400;
 const NOW = Math.floor(Date.now() / 1000);
 
