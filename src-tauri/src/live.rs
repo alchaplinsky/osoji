@@ -131,6 +131,54 @@ pub(crate) fn apply_batch(state: &AppState, batch: Batch, emit: impl Fn(Vec<Node
     log::warn!("live: the scan kept changing under a batch; dropped it after {ATTEMPTS} attempts");
 }
 
+/// Bring in the directories the scan could not read, once the user has granted Full Disk Access,
+/// without scanning everything again: each that opens now is walked and grafted, and loses its
+/// ERROR flag so the watcher follows it from here on. The rest keep the flag, stay skipped, and
+/// are not logged; the next retry tries them again. Returns how many are still unreadable.
+pub(crate) fn retry_unreadable(state: &AppState, emit: impl Fn(Vec<NodeId>)) -> usize {
+    let _serial = state.applying.lock().unwrap();
+    for _ in 0..ATTEMPTS {
+        // Paths first, probes and walks after: the scan lock is never held across I/O.
+        let Some((generation, epoch, targets)) = ({
+            let guard = state.scan.lock().unwrap();
+            guard.as_ref().map(|scan| {
+                let targets: Vec<(NodeId, PathBuf)> =
+                    unreadable_dirs(scan).map(|id| (id, scan.arena.path(id))).collect();
+                (state.generation.load(Ordering::Acquire), scan.epoch, targets)
+            })
+        }) else {
+            return 0;
+        };
+        if targets.is_empty() {
+            return 0;
+        }
+        let (open, still): (Vec<_>, Vec<_>) = targets.into_iter().partition(|(_, path)| readable(path));
+        let walks: Vec<(NodeId, Read<Tree>)> =
+            open.iter().filter_map(|(id, path)| walk(path).map(|tree| (*id, Read::Found(tree)))).collect();
+        let remaining = still.len() + (open.len() - walks.len());
+        let snapshot = Snapshot { generation, epoch, dirs: Vec::new(), rescans: Vec::new() };
+        if snapshot.commit(state, Reads { listings: Vec::new(), walks }, &emit).is_ok() {
+            return remaining;
+        }
+    }
+    log::warn!(
+        "live: the scan kept changing under a retry of unreadable directories; dropped it after {ATTEMPTS} attempts"
+    );
+    state.scan.lock().unwrap().as_ref().map_or(0, |scan| unreadable_dirs(scan).count())
+}
+
+/// Live directories the walker could not open.
+fn unreadable_dirs(scan: &Scan) -> impl Iterator<Item = NodeId> + '_ {
+    const UNREADABLE: Flags = Flags::DIR.union(Flags::ERROR);
+    (0..scan.arena.len() as NodeId)
+        .filter(move |&id| scan.arena.flags[id as usize].contains(UNREADABLE) && !is_gone(&scan.arena, id))
+}
+
+/// Whether the directory opens now; quieter than a walk, which warns about a root it cannot read.
+fn readable(path: &Path) -> bool {
+    std::fs::read_dir(path).is_ok()
+}
+
 /// What a batch refers to in the arena as it was when the batch arrived.
 struct Snapshot {
     generation: u64,
@@ -304,6 +352,8 @@ fn update(scan: &mut Scan, reads: Reads) -> Update {
         // An empty listing removes every child the way reconcile does, so their hard links hand over.
         reconcile(&mut scan.arena, &scan.index, &mut scan.links, id, &[]);
         graft(&mut scan.arena, &mut scan.links, &mut sub, sub_links, id);
+        // The walk opened it, so it is readable now whatever the scan found; the watcher follows it.
+        scan.arena.flags[id as usize].remove(Flags::ERROR);
         scan.index.extend(&scan.arena);
         changed.push(id);
     }
@@ -502,6 +552,34 @@ mod tests {
         assert!(apply(&state, dirs(&[&locked])).is_empty());
         assert!(apply(&state, Batch { dirs: Vec::new(), rescan: vec![locked.clone()] }).is_empty());
         assert_eq!(current(&state), before);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn granting_access_brings_unreadable_directories_in_without_a_rescan() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp_root("retry");
+        let locked = root.join("a/sub");
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        let state = state_for(&root);
+        let locked_id = id_of(&state, &locked);
+        let emitted = RefCell::new(Vec::new());
+        let emit = |ids: Vec<NodeId>| emitted.borrow_mut().push(ids);
+
+        // Still unreadable: nothing changes and it stays on the list.
+        assert_eq!(retry_unreadable(&state, emit), 1);
+        assert!(emitted.borrow().is_empty());
+
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(retry_unreadable(&state, emit), 0);
+        assert_eq!(*emitted.borrow(), vec![vec![locked_id]]);
+        assert_fresh(&state, &root);
+        assert!(with_scan(&state, |scan| !scan.arena.flags[locked_id as usize].contains(Flags::ERROR)));
+
+        // The watcher follows it from here on.
+        write(&locked.join("w"), 1_000);
+        assert_eq!(apply(&state, dirs(&[&locked])), vec![vec![locked_id]]);
+        assert_fresh(&state, &root);
         fs::remove_dir_all(&root).unwrap();
     }
 

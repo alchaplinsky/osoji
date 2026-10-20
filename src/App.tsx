@@ -23,7 +23,7 @@ import { useLiveScan } from "./hooks/useLiveScan";
 import { useItemMenu } from "./hooks/useItemMenu";
 import { useAutoUpdate } from "./hooks/useAutoUpdate";
 import UpdateToast from "./components/UpdateToast";
-import { homeDir, nodeInfo, reveal, trashInfo, trashNodes, volumeInfo, volumes as listVolumes } from "./lib/api";
+import { homeDir, nodeInfo, retryUnreadable, reveal, trashInfo, trashNodes, volumeInfo, volumes as listVolumes } from "./lib/api";
 import type { TrashInfo, TrashProgress } from "./lib/api";
 import { humanBytes } from "./lib/format";
 import { isProtected, reviewWarning } from "./lib/bin";
@@ -205,11 +205,28 @@ export default function App() {
   const openReviewMenu = (e: MouseEvent, item: BinItem) =>
     itemMenu.open(e, { id: item.id, path: item.path, inBin: true, onToggleBin: sweeping ? undefined : () => bin.remove(item.id) });
 
-  const showToast = (title: string, sub: string) => {
+  const showToast = useCallback((title: string, sub: string) => {
     window.clearTimeout(toastTimer.current);
     setToast({ title, sub });
     toastTimer.current = window.setTimeout(() => setToast(null), TOAST_MS);
-  };
+  }, []);
+
+  // Full Disk Access granted since the scan: fill in the folders it could not read, without a
+  // rescan. The breakdown refreshes through the usual live-change event.
+  const hadAccess = useRef(fda.granted);
+  const { setErrors } = scan;
+  useEffect(() => {
+    const gained = hadAccess.current === false && fda.granted === true;
+    hadAccess.current = fda.granted;
+    if (!gained || scan.status !== "done" || unreadable === 0) return;
+    retryUnreadable()
+      .then((still) => {
+        setErrors(still);
+        if (still === 0) showToast("Protected folders added", "Everything Osoji can read is in the breakdown now.");
+        else showToast("Some folders are still unreadable", `${still} ${still === 1 ? "folder" : "folders"} could not be read. Relaunching Osoji usually completes the access grant.`);
+      })
+      .catch(console.error);
+  }, [fda.granted, scan.status, unreadable, setErrors, showToast]);
 
   const confirmSweep = async () => {
     if (sweeping || bin.items.length === 0) return;

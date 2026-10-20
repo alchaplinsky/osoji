@@ -981,6 +981,14 @@ fn full_disk_access() -> bool {
     !denied
 }
 
+/// After Full Disk Access was granted: bring in the folders the last scan could not read, without
+/// scanning everything again (live.rs). Returns how many are still unreadable.
+#[tauri::command]
+async fn retry_unreadable(app: tauri::AppHandle) -> Result<usize, String> {
+    let handle = app.clone();
+    off_main(app, move |state| live::retry_unreadable(state, live::notify(&handle))).await
+}
+
 #[tauri::command]
 fn open_privacy_settings() -> Result<(), String> {
     std::process::Command::new("open").arg(PRIVACY_ALL_FILES_URL).spawn().map(|_| ()).map_err(|e| e.to_string())
@@ -1034,6 +1042,7 @@ pub fn run() {
             home_dir,
             volume_info,
             full_disk_access,
+            retry_unreadable,
             open_privacy_settings,
             volumes
         ])
