@@ -36,11 +36,13 @@ impl Watcher {
     }
 }
 
-/// A line of `/proc/self/mounts` that stands for a user-visible local volume.
+/// A line of `/proc/self/mounts`: every mounted filesystem, not only the volumes the sidebar
+/// shows, so the mount holding a scan root is found even on tmpfs, NFS or a bind mount.
 #[derive(Debug, PartialEq)]
 struct Mount {
     source: String,
     point: String,
+    fstype: String,
 }
 
 /// Image mounts (snaps, optical media) are never a disk the user manages.
@@ -49,10 +51,8 @@ const HIDDEN_FSTYPES: [&str; 2] = ["squashfs", "iso9660"];
 const HIDDEN_POINTS: [&str; 2] = ["/boot", "/boot/efi"];
 const HIDDEN_TREES: [&str; 6] = ["/snap", "/var/lib/docker", "/proc", "/sys", "/dev", "/run"];
 
-/// The volumes among the lines of `/proc/self/mounts` (`source point fstype options ...`):
-/// block devices outside the hidden trees, plus `/` whatever backs it (overlay and zfs roots
-/// have no `/dev/` source), so the list is never empty. A point mounted twice keeps the later
-/// line, which is the filesystem visible there.
+/// Every mount in the lines of `/proc/self/mounts` (`source point fstype options ...`). A point
+/// mounted twice keeps the later line, which is the filesystem visible there.
 fn parse_mounts(text: &str) -> Vec<Mount> {
     let mut out: Vec<Mount> = Vec::new();
     for line in text.lines() {
@@ -60,10 +60,7 @@ fn parse_mounts(text: &str) -> Vec<Mount> {
         let (Some(source), Some(point), Some(fstype)) = (fields.next(), fields.next(), fields.next()) else {
             continue;
         };
-        let mount = Mount { source: unescape(source), point: unescape(point) };
-        if !is_volume(&mount, fstype) {
-            continue;
-        }
+        let mount = Mount { source: unescape(source), point: unescape(point), fstype: fstype.to_string() };
         match out.iter_mut().find(|m| m.point == mount.point) {
             Some(existing) => *existing = mount,
             None => out.push(mount),
@@ -72,10 +69,12 @@ fn parse_mounts(text: &str) -> Vec<Mount> {
     out
 }
 
-fn is_volume(m: &Mount, fstype: &str) -> bool {
+/// A user-visible local volume for the sidebar: a block device outside the hidden trees, or `/`
+/// whatever backs it (overlay and zfs roots have no `/dev/` source), so the list is never empty.
+fn is_volume(m: &Mount) -> bool {
     m.point == "/"
         || (m.source.starts_with("/dev/")
-            && !HIDDEN_FSTYPES.contains(&fstype)
+            && !HIDDEN_FSTYPES.contains(&m.fstype.as_str())
             && !HIDDEN_POINTS.contains(&m.point.as_str())
             && !HIDDEN_TREES.iter().any(|tree| Path::new(&m.point).starts_with(tree)))
 }
@@ -107,8 +106,9 @@ fn parse_byte(bytes: &[u8], radix: u32, digits: usize) -> Option<u8> {
     u8::from_str_radix(s, radix).ok()
 }
 
-/// The mount holding `path`: the kept mount with the longest point that is a component-wise
-/// prefix of it, `/` when none is (a relative path).
+/// The mount holding `path`: the mount with the longest point that is a component-wise prefix
+/// of it, `/` when none is (a relative path). Searches every mount, not only the sidebar's
+/// volumes, so a scan root on tmpfs, a network share or a bind mount reports its own filesystem.
 fn mount_for<'a>(mounts: &'a [Mount], path: &str) -> Option<&'a Mount> {
     mounts
         .iter()
@@ -174,7 +174,7 @@ pub fn volume_info(path: &str) -> Result<VolumeInfo, String> {
 /// User-visible local volumes, `/` first and the rest by name. Mounts `statvfs` rejects
 /// (stale network shares, points this user cannot enter) are left out rather than failing the list.
 pub fn volumes() -> Result<Vec<VolumeInfo>, String> {
-    let mut out: Vec<VolumeInfo> = mounts()?.iter().filter_map(|m| volume(m).ok()).collect();
+    let mut out: Vec<VolumeInfo> = mounts()?.iter().filter(|m| is_volume(m)).filter_map(|m| volume(m).ok()).collect();
     out.sort_by(|a, b| (a.mount != "/").cmp(&(b.mount != "/")).then_with(|| a.name.cmp(&b.name)));
     Ok(out)
 }
@@ -219,36 +219,57 @@ tmpfs /run tmpfs rw,nosuid,nodev,noexec,relatime,size=1612516k,mode=755 0 0
 overlay /var/lib/docker/overlay2/3f1c/merged overlay rw,relatime,lowerdir=/var/lib/docker/overlay2/l/A 0 0
 ";
 
-    fn mount(source: &str, point: &str) -> Mount {
-        Mount { source: source.into(), point: point.into() }
+    fn mount(source: &str, point: &str, fstype: &str) -> Mount {
+        Mount { source: source.into(), point: point.into(), fstype: fstype.into() }
+    }
+
+    fn volumes_in(text: &str) -> Vec<Mount> {
+        parse_mounts(text).into_iter().filter(is_volume).collect()
     }
 
     #[test]
-    fn keeps_block_devices_outside_the_hidden_trees() {
-        let kept = parse_mounts(MOUNTS);
+    fn parses_every_mount_and_decodes_escapes() {
+        let all = parse_mounts(MOUNTS);
+        assert_eq!(all.len(), 9);
+        assert_eq!(all[7], mount("/dev/sdb1", "/media/alex/My Disk", "ext4"));
+        assert_eq!(all[5], mount("tmpfs", "/run", "tmpfs"));
+    }
+
+    #[test]
+    fn shows_block_devices_outside_the_hidden_trees() {
         assert_eq!(
-            kept,
+            volumes_in(MOUNTS),
             vec![
-                mount("/dev/nvme0n1p2", "/"),
-                mount("/dev/nvme0n1p3", "/home"),
-                mount("/dev/sdb1", "/media/alex/My Disk"),
+                mount("/dev/nvme0n1p2", "/", "ext4"),
+                mount("/dev/nvme0n1p3", "/home", "ext4"),
+                mount("/dev/sdb1", "/media/alex/My Disk", "ext4"),
             ]
         );
     }
 
     #[test]
-    fn keeps_a_root_without_a_device_source() {
-        let kept = parse_mounts("overlay / overlay rw,relatime 0 0\nproc /proc proc rw 0 0\n");
-        assert_eq!(kept, vec![mount("overlay", "/")]);
+    fn shows_a_root_without_a_device_source() {
+        let kept = volumes_in("overlay / overlay rw,relatime 0 0\nproc /proc proc rw 0 0\n");
+        assert_eq!(kept, vec![mount("overlay", "/", "overlay")]);
     }
 
     #[test]
     fn picks_the_longest_mount_holding_the_path() {
-        let kept = parse_mounts(MOUNTS);
-        assert_eq!(mount_for(&kept, "/home/alex/x").unwrap().point, "/home");
-        assert_eq!(mount_for(&kept, "/homework").unwrap().point, "/");
-        assert_eq!(mount_for(&kept, "/media/alex/My Disk").unwrap().point, "/media/alex/My Disk");
-        assert_eq!(mount_for(&kept, "relative").unwrap().point, "/");
+        let all = parse_mounts(MOUNTS);
+        assert_eq!(mount_for(&all, "/home/alex/x").unwrap().point, "/home");
+        assert_eq!(mount_for(&all, "/homework").unwrap().point, "/");
+        assert_eq!(mount_for(&all, "/media/alex/My Disk").unwrap().point, "/media/alex/My Disk");
+        assert_eq!(mount_for(&all, "relative").unwrap().point, "/");
+    }
+
+    #[test]
+    fn a_scan_root_on_a_hidden_mount_still_reports_its_own_filesystem() {
+        let text = format!("{MOUNTS}nas:/export /mnt/nas nfs4 rw,relatime 0 0\n");
+        let all = parse_mounts(&text);
+        // Neither is a sidebar volume, but the ring for a scan there must describe that filesystem.
+        assert_eq!(mount_for(&all, "/run/user/1000/doc").unwrap().point, "/run");
+        assert_eq!(mount_for(&all, "/mnt/nas/photos").unwrap().point, "/mnt/nas");
+        assert!(!volumes_in(&text).iter().any(|m| m.point == "/mnt/nas" || m.point == "/run"));
     }
 
     #[test]
