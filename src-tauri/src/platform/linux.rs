@@ -3,10 +3,8 @@
 //! the rest comes with the Linux work that follows.
 
 use super::VolumeInfo;
-use scan_core::live::Batch;
 use std::ffi::CString;
-use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub use scan_core::jwalk_walker::walk;
 pub use scan_core::live::list_dir;
@@ -18,23 +16,9 @@ pub fn init() {
     scan_core::raise_fd_limit();
 }
 
-/// Stands in for a watcher until Linux has one: `start` always fails, so every scan reports
-/// `live: false` and the UI shows a view that does not follow changes.
-#[allow(dead_code)]
-pub struct Watcher {
-    root: PathBuf,
-}
-
-impl Watcher {
-    pub fn start(_root: &Path, _on_batch: impl Fn(Batch) + Send + 'static) -> io::Result<Watcher> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "file watching is not implemented on Linux yet"))
-    }
-
-    #[allow(dead_code)]
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-}
+/// The inotify watcher. `start` fails once the user's `fs.inotify.max_user_watches` are used
+/// up (the error names the sysctl); the scan then reports `live: false`.
+pub use scan_linux::Watcher;
 
 /// `statvfs` counts are `c_ulong`/`fsblkcnt_t`, 64-bit on the targets Osoji builds for; the cast
 /// keeps a 32-bit build honest.
