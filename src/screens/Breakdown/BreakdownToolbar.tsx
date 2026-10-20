@@ -3,6 +3,7 @@ import type { NodeInfo } from "../../lib/api";
 import Toolbar from "../../components/Toolbar";
 import Breadcrumbs from "../../components/Breadcrumbs";
 import { Icon, IconButton, Menu } from "../../components/ui";
+import { fileManager, modHint } from "../../lib/platform";
 import styles from "./Breakdown.module.css";
 
 type BreakdownToolbarProps = {
@@ -25,8 +26,8 @@ export default function BreakdownToolbar({ info, onNavigate, onRescan, onReveal 
           open={menuOpen}
           onClose={() => setMenuOpen(false)}
           items={[
-            { label: "Scan again", hint: "⌘R", onSelect: onRescan },
-            { label: "Reveal in Finder", hint: "⌘⏎", onSelect: onReveal },
+            { label: "Scan again", hint: modHint("R"), onSelect: onRescan },
+            { label: `Reveal in ${fileManager()}`, hint: modHint("Enter"), onSelect: onReveal },
           ]}
         />
       </div>

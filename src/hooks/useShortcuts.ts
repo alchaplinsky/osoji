@@ -1,7 +1,11 @@
 import { useEffect, useRef } from "react";
+import { isMac } from "../lib/platform";
 
 // Keys are combos like "Meta+r" or "Meta+Enter": modifiers in Ctrl, Alt, Shift, Meta order, then the key.
 export type Shortcuts = Record<string, () => void>;
+
+/** The combo for `key` under the primary modifier: `modCombo("r")` is "Meta+r" on macOS and "Ctrl+r" elsewhere. */
+export const modCombo = (key: string) => `${isMac() ? "Meta" : "Ctrl"}+${key}`;
 
 export function comboOf(e: KeyboardEvent): string {
   const mods = [e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", e.metaKey && "Meta"].filter(Boolean);
@@ -15,7 +19,7 @@ function isEditable(target: EventTarget | null): boolean {
 }
 
 // One window keydown listener for the whole app. Matching combos are preventDefault-ed so the
-// webview does not act on them (⌘R would otherwise reload it).
+// webview does not act on them (⌘R, or Ctrl+R off macOS, would otherwise reload it).
 export function useShortcuts(shortcuts: Shortcuts, enabled = true) {
   const latest = useRef(shortcuts);
   latest.current = shortcuts;
