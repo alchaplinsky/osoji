@@ -293,16 +293,29 @@ fn linux_trash_follows_a_custom_xdg_data_home() {
         ("/home/alex/.local", 0, 1, true),
         ("/home/alex/.local/share", 0, 1, true),
         ("/home/alex/.local/share/Trash", 0, 1, true),
+        ("/home/alex/.local/share/gnome", 0, 1, true),
         ("/srv", 0, 1, true),
         ("/srv/xdg", 0, 1, true),
         ("/srv/xdg/Trash", 0, 1, true),
+        ("/srv/xdg/gnome", 0, 1, true),
+        ("/srv/xdg/flatpak", 0, 1, true),
     ]);
     let policy = Policy::from_toml(LINUX).unwrap();
     let ctx = PolicyContext { home: PathBuf::from(LINUX_HOME), now: NOW, data_home: PathBuf::from("/srv/xdg") };
-    policy.resolve(&f.arena, &f.index, &ctx).stamp(&mut f.arena);
+    let hits = policy.resolve(&f.arena, &f.index, &ctx).stamp(&mut f.arena);
+    let rule_id = |p: &str| hits.rule(f.id(p)).map(|i| policy.rule(i).id.as_str());
 
+    // Every rule about the data directory follows it: the Trash, the directory itself, its children.
     assert!(f.arena.flags[f.id("/srv/xdg/Trash") as usize].contains(Flags::TRASH_FOLDER));
+    assert_eq!(rule_id("/srv/xdg"), Some("local-share"));
+    assert_eq!(rule_id("/srv/xdg/gnome"), Some("app-data"));
+    let found = cleanup_rule_ids(&policy, &f, &ctx);
+    assert!(found.iter().any(|(p, r)| p == "/srv/xdg/flatpak" && r == "flatpak-user"));
+
+    // The default location is just another folder now.
     assert!(!f.arena.flags[f.id("/home/alex/.local/share/Trash") as usize].contains(Flags::TRASH_FOLDER));
+    assert_eq!(rule_id("/home/alex/.local/share"), None);
+    assert_eq!(rule_id("/home/alex/.local/share/gnome"), None);
 }
 
 #[test]

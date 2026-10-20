@@ -194,7 +194,7 @@ match = { path = "~/.config" }
 id = "local-share"
 kind = "risky"
 reason = "Data for all your apps, and the Trash. Remove single apps' folders inside it instead."
-match = { path = "~/.local/share" }
+match = { path = "$XDG_DATA_HOME" }
 
 [[rule]]
 id = "local-bin"
@@ -218,7 +218,7 @@ match = { path = "~/.thunderbird" }
 id = "app-data"
 kind = "risky"
 reason = "App data. The app may lose its settings or documents."
-match = { parent = "~/.local/share" }
+match = { parent = "$XDG_DATA_HOME" }
 
 # Cleanup: what Suggestions offers. The first matching rule wins, and a match stands for everything
 # inside it. `{age}` and `{size}` in a reason are filled in per item.
@@ -314,7 +314,7 @@ id = "flatpak-user"
 kind = "cleanup"
 safety = "review"
 reason = "Flatpak apps installed just for you, and their runtimes. Remove single apps with flatpak instead."
-match = { path = "~/.local/share/flatpak", dir = true }
+match = { path = "$XDG_DATA_HOME/flatpak", dir = true }
 
 [[rule]]
 id = "old-download"
