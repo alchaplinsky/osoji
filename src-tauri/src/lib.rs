@@ -410,7 +410,7 @@ async fn scan(
     };
     let summary = summary(&arena, watcher.is_some());
     let index = ChildIndex::build(&arena);
-    let ctx = PolicyContext { home: home_path(), now: unix_now() };
+    let ctx = PolicyContext::new(home_path(), unix_now());
     let hits = state.policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
     {
         let mut slot = state.scan.lock().unwrap();
@@ -575,7 +575,7 @@ async fn suggestions(app: tauri::AppHandle) -> Result<Vec<Suggestion>, String> {
     off_main(app, |state| {
         let guard = state.scan.lock().unwrap();
         let scan = guard.as_ref().ok_or("no scan loaded")?;
-        let ctx = PolicyContext { home: home_path(), now: unix_now() };
+        let ctx = PolicyContext::new(home_path(), unix_now());
         Ok(collect_suggestions(&state.policy, scan, &ctx))
     })
     .await?
@@ -787,7 +787,7 @@ fn finish_sweep(
         touched.extend(up);
     }
     if let Some(scan) = live.filter(|_| !touched.is_empty()) {
-        scan.restamp(policy, &PolicyContext { home: home_path(), now: unix_now() }, touched);
+        scan.restamp(policy, &PolicyContext::new(home_path(), unix_now()), touched);
     }
     TrashResult { bytes, count: trashed.len(), trashed, failed }
 }
@@ -1072,7 +1072,7 @@ mod tests {
         arena.aggregate();
         let index = ChildIndex::build(&arena);
         let policy = Policy::from_toml(TRASH_POLICY).unwrap();
-        let ctx = PolicyContext { home: PathBuf::new(), now: 0 };
+        let ctx = PolicyContext::new(PathBuf::new(), 0);
         let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
         (
             policy,
@@ -1164,7 +1164,7 @@ mod tests {
         arena.aggregate();
         let index = ChildIndex::build(&arena);
         let policy = Policy::from_toml(GUARD_POLICY).unwrap();
-        let ctx = PolicyContext { home: PathBuf::new(), now: 0 };
+        let ctx = PolicyContext::new(PathBuf::new(), 0);
         let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
         let mut scan =
             Scan { root: PathBuf::from("/tmp/root"), arena, index, hits, links: Hardlinks::default(), epoch: 0 };
@@ -1208,7 +1208,7 @@ mod tests {
         arena.aggregate();
         let index = ChildIndex::build(&arena);
         let policy = Policy::from_toml(GUARD_POLICY).unwrap();
-        let ctx = PolicyContext { home: PathBuf::new(), now: 0 };
+        let ctx = PolicyContext::new(PathBuf::new(), 0);
         let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
         let mut scan =
             Scan { root: PathBuf::from("/tmp/root"), arena, index, hits, links: Hardlinks::default(), epoch: 0 };
@@ -1290,7 +1290,7 @@ mod tests {
     fn suggest(root: &Path, mut arena: Arena, home: &Path, now: i64) -> Vec<Suggestion> {
         let policy = Policy::for_current_os().unwrap();
         let index = ChildIndex::build(&arena);
-        let ctx = PolicyContext { home: home.to_path_buf(), now };
+        let ctx = PolicyContext::new(home.to_path_buf(), now);
         let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
         let scan = Scan { root: root.to_path_buf(), arena, index, hits, links: Hardlinks::default(), epoch: 0 };
         collect_suggestions(&policy, &scan, &ctx)

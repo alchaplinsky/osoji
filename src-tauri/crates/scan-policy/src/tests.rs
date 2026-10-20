@@ -92,12 +92,17 @@ fn build(nodes: &[(&'static str, u64, i64, bool)]) -> Fixture {
     Fixture { arena, index, ids }
 }
 
+/// A context with the default data directory, independent of this process's environment.
+fn context(home: &str) -> PolicyContext {
+    PolicyContext { home: PathBuf::from(home), now: NOW, data_home: Path::new(home).join(".local/share") }
+}
+
 pub(crate) fn ctx() -> PolicyContext {
-    PolicyContext { home: PathBuf::from(HOME), now: NOW }
+    context(HOME)
 }
 
 fn linux_ctx() -> PolicyContext {
-    PolicyContext { home: PathBuf::from(LINUX_HOME), now: NOW }
+    context(LINUX_HOME)
 }
 
 /// `(path, rule id)` for every cleanup match of `policy` in the fixture, ordered by path.
@@ -258,11 +263,46 @@ fn rejects_empty_match_relative_paths_and_bad_values() {
 
 #[test]
 fn expands_tilde_to_home() {
-    let home = Path::new(HOME);
-    assert_eq!(expand("~", home), Some(PathBuf::from(HOME)));
-    assert_eq!(expand("~/Library/Caches", home), Some(PathBuf::from("/Users/alex/Library/Caches")));
-    assert_eq!(expand("/System", home), Some(PathBuf::from("/System")));
-    assert_eq!(expand("~/Library", Path::new("")), None);
+    let (home, data) = (Path::new(HOME), Path::new("/Users/alex/.local/share"));
+    assert_eq!(expand("~", home, data), Some(PathBuf::from(HOME)));
+    assert_eq!(expand("~/Library/Caches", home, data), Some(PathBuf::from("/Users/alex/Library/Caches")));
+    assert_eq!(expand("/System", home, data), Some(PathBuf::from("/System")));
+    assert_eq!(expand("~/Library", Path::new(""), data), None);
+}
+
+#[test]
+fn expands_xdg_data_home_to_the_data_directory() {
+    let (home, data) = (Path::new("/home/alex"), Path::new("/srv/xdg"));
+    assert_eq!(expand("$XDG_DATA_HOME", home, data), Some(PathBuf::from("/srv/xdg")));
+    assert_eq!(expand("$XDG_DATA_HOME/Trash", home, data), Some(PathBuf::from("/srv/xdg/Trash")));
+    assert_eq!(expand("$XDG_DATA_HOME/Trash", home, Path::new("")), None);
+
+    let unset = crate::lookup::data_home_from(home, None);
+    assert_eq!(unset, PathBuf::from("/home/alex/.local/share"));
+    assert_eq!(crate::lookup::data_home_from(home, Some(std::ffi::OsStr::new("/srv/xdg"))), PathBuf::from("/srv/xdg"));
+    // The spec says a relative or empty value must be ignored.
+    assert_eq!(crate::lookup::data_home_from(home, Some(std::ffi::OsStr::new("xdg"))), unset);
+    assert_eq!(crate::lookup::data_home_from(home, Some(std::ffi::OsStr::new(""))), unset);
+}
+
+#[test]
+fn linux_trash_follows_a_custom_xdg_data_home() {
+    let mut f = build(&[
+        ("/home", 0, 1, true),
+        ("/home/alex", 0, 1, true),
+        ("/home/alex/.local", 0, 1, true),
+        ("/home/alex/.local/share", 0, 1, true),
+        ("/home/alex/.local/share/Trash", 0, 1, true),
+        ("/srv", 0, 1, true),
+        ("/srv/xdg", 0, 1, true),
+        ("/srv/xdg/Trash", 0, 1, true),
+    ]);
+    let policy = Policy::from_toml(LINUX).unwrap();
+    let ctx = PolicyContext { home: PathBuf::from(LINUX_HOME), now: NOW, data_home: PathBuf::from("/srv/xdg") };
+    policy.resolve(&f.arena, &f.index, &ctx).stamp(&mut f.arena);
+
+    assert!(f.arena.flags[f.id("/srv/xdg/Trash") as usize].contains(Flags::TRASH_FOLDER));
+    assert!(!f.arena.flags[f.id("/home/alex/.local/share/Trash") as usize].contains(Flags::TRASH_FOLDER));
 }
 
 #[test]
@@ -453,7 +493,7 @@ fn trash_rules_protect_the_folder_and_win_over_protected() {
 fn skips_home_rules_without_a_home() {
     let mut f = fixture();
     let policy = Policy::from_toml(MACOS).unwrap();
-    let ctx = PolicyContext { home: PathBuf::new(), now: NOW };
+    let ctx = PolicyContext::new(PathBuf::new(), NOW);
     policy.resolve(&f.arena, &f.index, &ctx).stamp(&mut f.arena);
     assert!(f.arena.flags[f.id("/System") as usize].contains(Flags::PROTECTED));
     assert!(!f.arena.flags[f.id(HOME) as usize].contains(Flags::PROTECTED));

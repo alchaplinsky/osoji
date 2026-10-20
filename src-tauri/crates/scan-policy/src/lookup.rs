@@ -1,17 +1,41 @@
 use scan_core::{Arena, ChildIndex, Flags, NodeId, NONE};
+use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
-/// Expand a leading `~` to `home`. Returns None when the path needs a home that is unknown.
-pub fn expand(path: &str, home: &Path) -> Option<PathBuf> {
-    let rest = match path.strip_prefix('~') {
-        None => return Some(PathBuf::from(path)),
-        Some(rest) => rest.trim_start_matches('/'),
+/// The token a rule path may start with to mean the user's XDG data directory.
+const XDG_DATA_HOME: &str = "$XDG_DATA_HOME";
+
+/// Expand a leading `~` to `home` or a leading `$XDG_DATA_HOME` to `data_home`. Returns None
+/// when the path needs a base that is unknown (not absolute).
+pub fn expand(path: &str, home: &Path, data_home: &Path) -> Option<PathBuf> {
+    let (base, rest) = if let Some(rest) = path.strip_prefix(XDG_DATA_HOME) {
+        (data_home, rest)
+    } else if let Some(rest) = path.strip_prefix('~') {
+        (home, rest)
+    } else {
+        return Some(PathBuf::from(path));
     };
-    if !home.is_absolute() {
+    if !base.is_absolute() {
         return None;
     }
-    Some(if rest.is_empty() { home.to_path_buf() } else { home.join(rest) })
+    let rest = rest.trim_start_matches('/');
+    Some(if rest.is_empty() { base.to_path_buf() } else { base.join(rest) })
+}
+
+/// The user's XDG data directory: `$XDG_DATA_HOME` when set to an absolute path, else the
+/// `~/.local/share` default. The Trash lives under it.
+pub fn xdg_data_home(home: &Path) -> PathBuf {
+    data_home_from(home, std::env::var_os("XDG_DATA_HOME").as_deref())
+}
+
+/// `xdg_data_home` with the variable's value passed in, so it is testable without touching the
+/// environment. The spec says a relative value must be ignored.
+pub(crate) fn data_home_from(home: &Path, var: Option<&OsStr>) -> PathBuf {
+    match var {
+        Some(v) if !v.is_empty() && Path::new(v).is_absolute() => PathBuf::from(v),
+        _ => home.join(".local/share"),
+    }
 }
 
 /// Resolve an absolute path to a node of the scan, or NONE when it is outside the scan or missing.

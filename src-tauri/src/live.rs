@@ -284,7 +284,7 @@ impl Snapshot {
 
         let grafts: Vec<(NodeId, Tree)> =
             new_dirs.into_iter().filter_map(|(id, path)| walk(&path).map(|tree| (id, tree))).collect();
-        let ctx = PolicyContext { home: home_path(), now: unix_now() };
+        let ctx = PolicyContext::new(home_path(), unix_now());
         let applied = locked(state, self.generation, |scan| {
             for (id, (mut sub, sub_links)) in grafts {
                 // Swept or deleted since it was inserted; its walk would count under a detached node.
@@ -480,7 +480,7 @@ mod tests {
     fn scan_of(root: &Path, policy: &Policy) -> Scan {
         let (mut arena, links) = walk(root).unwrap();
         let index = ChildIndex::build(&arena);
-        let ctx = PolicyContext { home: home_path(), now: unix_now() };
+        let ctx = PolicyContext::new(home_path(), unix_now());
         let hits = policy.resolve(&arena, &index, &ctx).stamp(&mut arena);
         Scan { root: root.to_path_buf(), arena, index, hits, links, epoch: 0 }
     }
