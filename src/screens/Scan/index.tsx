@@ -4,7 +4,7 @@ import { useSmoothed } from "../../hooks/useSmoothed";
 import type { ProgressMsg, ScanSummary } from "../../lib/api";
 import type { Volume } from "../../lib/types";
 import { humanBytes, humanCount, humanDuration } from "../../lib/format";
-import { scanFraction } from "../../lib/scanEstimate";
+import { scanFraction, type ScanExpectation } from "../../lib/scanEstimate";
 import { useTheme } from "../../hooks/useTheme";
 import { neutral, tone } from "../../design/palette";
 import { Button, SegmentBar, StatTile, type Segment } from "../../components/ui";
@@ -13,11 +13,13 @@ import styles from "./Scan.module.css";
 
 type ScanScreenProps = {
   volume: Volume | null;
+  /** Path being scanned; the ring spans the disk when it is `volume.mount`, else the folder. */
+  scanRoot: string;
   rootLabel: string;
   status: ScanStatus;
   progress: ProgressMsg | null;
-  /** Bytes the scan is expected to find; null leaves the ring indeterminate. See `expectedBytes`. */
-  expectedBytes: number | null;
+  /** What the scan is expected to find; null leaves the ring indeterminate. See `expectedScan`. */
+  expected: ScanExpectation | null;
   /** The scan has completed and the screen is resting at 100% before the breakdown takes over. */
   finishing?: boolean;
   summary: ScanSummary | null;
@@ -81,16 +83,31 @@ function segmentsOf(tops: ProgressMsg["tops"], shares: number[], restShare: numb
   return [...slots, { key: "rest", size: restShare, fill: neutral(theme), title: "Everything else" }];
 }
 
-function ringCentre(scanning: boolean, fraction: number | null, found: string, used: number, volume: Volume | null) {
-  if (!scanning) return { value: volume ? `${Math.round(used * 100)}%` : "—", label: "used", size: 42 };
-  if (fraction !== null) return { value: `${Math.round(fraction * 100)}%`, label: "scanned", size: 42 };
-  return { value: found, label: "found so far", size: found.length > SHORT_VALUE ? 28 : 42 };
+/** A byte figure for the ring's centre, in the smaller size when it would not fit. */
+function bytesCentre(value: string, label: string) {
+  return { value, label, size: value.length > SHORT_VALUE ? 28 : 42 };
 }
 
-export default function ScanScreen({ volume, rootLabel, status, progress, expectedBytes, finishing = false, summary, error, onStart, onStop }: ScanScreenProps) {
+/** The resting ring reads a disk's used share, or a folder's size from its last scan. */
+function restingCentre(isVolume: boolean, used: number, lastBytes: number | null) {
+  if (isVolume) return { value: `${Math.round(used * 100)}%`, label: "used", size: 42 };
+  return bytesCentre(lastBytes ? humanBytes(lastBytes) : "—", "last scan");
+}
+
+function ringCentre(scanning: boolean, fraction: number | null, found: string, resting: ReturnType<typeof restingCentre>) {
+  if (!scanning) return resting;
+  if (fraction !== null) return { value: `${Math.round(fraction * 100)}%`, label: "scanned", size: 42 };
+  return bytesCentre(found, "found so far");
+}
+
+export default function ScanScreen({ volume, scanRoot, rootLabel, status, progress, expected, finishing = false, summary, error, onStart, onStop }: ScanScreenProps) {
   const { theme } = useTheme();
   const scanning = status === "scanning" || finishing;
-  const used = volume && volume.total > 0 ? (volume.total - volume.free) / volume.total : 0;
+  const isVolume = volume !== null && volume.total > 0 && scanRoot === volume.mount;
+  const used = isVolume ? (volume.total - volume.free) / volume.total : 0;
+  // The ring is the item being scanned: a disk shows its used share with free space left open, a
+  // folder has no free space and fills the whole ring. The scan's 100% is the end of that arc.
+  const span = isVolume ? used : 1;
   const found = humanBytes(progress?.bytes ?? 0);
   const unreadable = status === "done" && summary ? summary.errors : 0;
 
@@ -99,16 +116,17 @@ export default function ScanScreen({ volume, rootLabel, status, progress, expect
   const barTotal = volume && volume.total > 0 ? volume.total : null;
   const share = (bytes: number) => (barTotal ? Math.min(1, bytes / barTotal) : 0);
   const tops = rankedTops(progress);
-  const targetFraction = finishing ? 1 : scanning ? scanFraction(progress?.bytes ?? 0, expectedBytes) : null;
+  const targetFraction = finishing ? 1 : scanning ? scanFraction(progress, expected) : null;
   const targets = [targetFraction ?? 0, share(progress?.rest ?? 0), ...tops.map((t) => share(t.bytes))];
   const [fractionNow, restShare, ...topShares] = useSmoothed(targets, SMOOTH_TAU_MS, !scanning || progress === null);
   const fraction = targetFraction === null ? null : fractionNow;
-  const centre = ringCentre(scanning, fraction, found, used, volume);
+  // For a folder `expected` is only ever its last scan; a disk falls back to statfs, so it is not shown.
+  const centre = ringCentre(scanning, fraction, found, restingCentre(isVolume, used, expected?.bytes ?? null));
 
   return (
     <section className={styles.screen}>
       <div className={styles.dragStrip} data-tauri-drag-region="deep" />
-      <ScanRing used={used} scanning={scanning} progress={fraction} value={centre.value} valueSize={centre.size} label={centre.label} />
+      <ScanRing span={span} scanning={scanning} progress={fraction} value={centre.value} valueSize={centre.size} label={centre.label} />
       <div className={styles.title}>{titleFor(status, rootLabel)}</div>
       <div className={styles.sub}>{subFor(status, summary, error)}</div>
 

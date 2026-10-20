@@ -27,7 +27,7 @@ import { homeDir, nodeInfo, reveal, trashInfo, trashNodes, volumeInfo, volumes a
 import type { TrashInfo, TrashProgress } from "./lib/api";
 import { humanBytes } from "./lib/format";
 import { isProtected, reviewWarning } from "./lib/bin";
-import { expectedBytes } from "./lib/scanEstimate";
+import { expectedScan } from "./lib/scanEstimate";
 import { useScanTotals } from "./hooks/useScanTotals";
 import { pathTo } from "./lib/tree";
 import type { BinItem, HoverId, Screen, Viz, Volume, WatcherStatus } from "./lib/types";
@@ -105,7 +105,7 @@ export default function App() {
     if (scan.status === "done") {
       const done = scan.summary;
       const completed = done !== null && !done.cancelled;
-      if (completed) remember(done.root, done.bytes);
+      if (completed) remember(done.root, { bytes: done.bytes, entries: done.entries });
       setFinishing(completed);
       const settle = new Promise((resolve) => setTimeout(resolve, completed ? SCAN_SETTLE_MS : 0));
       Promise.all([load(0), loadInsights(), refreshWatchers(), loadTrash(), settle])
@@ -306,10 +306,11 @@ export default function App() {
         {active === "scan" && (
           <ScanScreen
             volume={volume}
+            scanRoot={scanRoot}
             rootLabel={rootLabel}
             status={scan.status}
             progress={scan.progress}
-            expectedBytes={expectedBytes(volume, scanRoot, totals.get(scanRoot))}
+            expected={expectedScan(volume, scanRoot, totals.get(scanRoot))}
             finishing={finishing}
             summary={scan.summary}
             error={scan.error}
