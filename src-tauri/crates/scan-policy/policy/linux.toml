@@ -138,7 +138,7 @@ match = { path = "~/.gnupg" }
 id = "trash"
 kind = "trash"
 reason = "Already in the Trash. Empty the Trash from your file manager to reclaim the space."
-match = { path = "~/.local/share/Trash", dir = true }
+match = { path = "$XDG_DATA_HOME/Trash", dir = true }
 
 # Risky: allowed, but the review asks twice.
 
@@ -258,19 +258,14 @@ safety = "safe"
 reason = "Rust build output. Rebuilt by cargo."
 match = { name = "target", dir = true, sibling = "Cargo.toml" }
 
+# Review, not safe: the matcher cannot check for the pyvenv.cfg inside, and a folder by this
+# name may hold anything. The plain "venv" name is too generic to suggest at all.
 [[rule]]
 id = "python-venv"
 kind = "cleanup"
-safety = "safe"
-reason = "A Python virtual environment. Recreated by your project's setup step."
+safety = "review"
+reason = "Probably a Python virtual environment, recreated by your project's setup step. Check before removing."
 match = { name = ".venv", dir = true }
-
-[[rule]]
-id = "python-venv-plain"
-kind = "cleanup"
-safety = "safe"
-reason = "A Python virtual environment. Recreated by your project's setup step."
-match = { name = "venv", dir = true }
 
 [[rule]]
 id = "pycache"
