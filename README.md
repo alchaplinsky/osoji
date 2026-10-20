@@ -203,7 +203,7 @@ bun run test:e2e:build  # debug build with --features webdriver, then WebdriverI
 
 The e2e suite talks to a WebDriver server that `tauri-plugin-webdriver` runs on port 4445 in builds made with `--features webdriver`, never in release bundles. It starts Vite and the app itself and points the app's `HOME` at a small fixture folder.
 
-CI runs all of the above on pull requests and on `main`. The frontend checks and the `scan-core` and `scan-policy` crates run on Linux. The app crate, `scan-macos` and the e2e suite only build on macOS, so they run on a macOS runner.
+CI runs all of the above on pull requests and on `main`. The frontend checks, the `scan-core` and `scan-policy` crates, and a build and test of the app crate (with the jwalk walker and no file watcher) run on Linux. `scan-macos` and the e2e suite only build on macOS, so they run on a macOS runner.
 
 ### Releasing
 

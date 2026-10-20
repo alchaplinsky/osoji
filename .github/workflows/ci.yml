@@ -42,9 +42,33 @@ jobs:
       - name: Rust tests
         run: cargo test -p scan-core -p scan-policy --manifest-path src-tauri/Cargo.toml
 
-  # The scanner (scan-macos) is built on getattrlistbulk and the app crate links it directly, so
-  # neither compiles on Linux. Only what needs the real app runs here: those crates' tests, their
-  # clippy pass, the debug build, and the e2e suite that drives it.
+  # The app crate reaches the OS only through src-tauri/src/platform, so it also builds on Linux
+  # (jwalk walker, no file watcher yet). This proves the seam holds; the e2e suite stays on macOS.
+  # A debug build takes the page from the Vite dev URL, so no frontend build is needed here.
+  app-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Clippy
+        run: cargo clippy -p osoji-app -p scan-cli --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
+      - name: Rust tests
+        run: cargo test -p osoji-app --manifest-path src-tauri/Cargo.toml
+      - name: Build debug app
+        run: cargo build --manifest-path src-tauri/Cargo.toml
+
+  # The scanner (scan-macos) is built on getattrlistbulk and FSEvents, so it only compiles here.
+  # Only what needs the real app runs here: the app and scanner tests, their clippy pass, the debug
+  # build, and the e2e suite that drives it.
   app:
     runs-on: macos-latest
     steps:
