@@ -12,7 +12,7 @@
   <p align="center">
     See what fills your Mac. Clean it up without fear.
     <br />
-    An open-source disk explorer and cleaner for macOS, with a sunburst that scans a full disk in about 30 seconds.
+    An open-source disk explorer and cleaner for macOS, with a sunburst and a high-performance scanner built to keep full-disk scans short.
     <br />
     <br />
     <a href="https://github.com/alchaplinsky/osoji/releases/latest"><strong>Download the latest release »</strong></a>
@@ -62,11 +62,11 @@ It exists because the good disk visualisers for the Mac are closed source and th
 
 **What makes it different**
 
-- **Fast enough to scan the whole disk every time.** About 2.4× faster than DaisyDisk on the same machine, and ahead of `dua-cli`, `jwalk` and `du`.
+- **Fast enough to scan the whole disk every time.** Ahead of `dua-cli`, `jwalk` and `du` on the same machine.
 - **Stays current while it is open.** An FSEvents watcher keeps the finished scan in sync with the disk. Build a project, empty a cache, trash a folder, and the chart updates. No rescan.
 - **Suggestions you can trust.** A readable policy file decides what is safe, what needs review, and what must never be touched. Every suggestion comes with a reason and the bytes it frees.
 - **Nothing goes until you review.** Items collect in a bin. You confirm the total. Everything goes to the macOS Trash, never to oblivion.
-- **Small.** Around 26 bytes of memory per file, names included. A nine-million-entry home folder fits in roughly 235 MB.
+- **Small.** Around 26 bytes of memory per file, names included. An 8.9-million-entry home folder fits in 236 MB.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -75,12 +75,12 @@ It exists because the good disk visualisers for the Mac are closed source and th
 
 - **Four ways to look at a folder.** Sunburst, treemap, shelf and orbit views, with breadcrumbs, hover labels and a list panel for the current ring.
 - **Breakdown.** A capacity bar for the disk with Users, Applications, System, Library and friends, plus Free and Not scanned so the numbers add up to what Finder reports.
-- **Largest files.** The biggest files on the disk, filterable to the ones that are safe to drop or have not been touched in months.
+- **Largest files.** The biggest files on the disk, filterable to the ones that are safe to remove or over a year old.
 - **Suggestions.** Developer caches (`node_modules`, `target/`, DerivedData, iOS DeviceSupport, Gradle, npm, cargo, bun), app caches, old downloads, large stale files, Docker disk images and virtual machines, grouped as *Safe to remove*, *Worth a look* and *We would keep these*. A *Worth knowing* group flags things that are usually not there, like an unknown top-level folder or another user's home.
 - **Watchers.** Keep an eye on folders that tend to grow, such as Downloads or a caches folder, and set a size limit for each.
 - **Scan any disk or folder.** Pick a volume or a folder in the sidebar. The chart's centre is whatever you picked.
 - **Full Disk Access aware.** Without it, Osoji still scans everything it can, shows a lock on what it could not read, and offers a one-click jump to the right System Settings pane.
-- **Reveal in Finder, open the Trash, put things back.** Everything you sweep can be restored until you empty the Trash.
+- **Reveal in Finder, open the Trash.** Everything you sweep can be put back from the Trash until you empty it.
 - **Themes and layouts.** Instrument, Glass and Light themes. Floating cards or classic panes.
 - **Updates itself.** Signed, notarized universal builds, checked on launch from GitHub Releases, with a one-click restart.
 
@@ -94,9 +94,8 @@ Full disk scan from `/` on a MacBook Pro (M3 Pro, 12 cores, APFS), 8 threads, 10
 | Scanner | Cold cache | Warm cache | Peak memory |
 | --- | ---: | ---: | ---: |
 | **Osoji** | **34 s** | **30 s** | **~330 MB** |
-| DaisyDisk 4.34.2 | 79 s | 81 s | — |
 
-And on a 8.9 million entry home folder, warm cache, 8 threads:
+And on an 8.9-million-entry home folder, warm cache, 8 threads:
 
 | Walker | Median | vs Osoji | Peak memory |
 | --- | ---: | ---: | ---: |
@@ -116,7 +115,7 @@ How it gets there, in short: every worker thread drains `getattrlistbulk` into a
 
 Disk cleaners are only useful if you dare to press the button. Osoji is built around that.
 
-- **Trash only.** The app moves items to the macOS Trash and nothing else. "Delete permanently" is in the UI, disabled, and stays that way until the backend grows a command for it.
+- **Trash only.** The app moves items to the macOS Trash and nothing else. "Delete permanently" is in the UI and disabled.
 - **Review before anything moves.** Dropped and ticked items sit in a bin until you open the review sheet, see the total, and confirm. A setting asks once more for anything over 1 GB.
 - **Protected paths are off limits.** `/System`, `/Library`, `/usr`, your home folder, Keychains, Mail, Messages, iCloud Drive, Dropbox and the like are never offered and cannot be swept. Personal folders such as Desktop and Documents are marked risky and ask twice.
 - **Readable rules.** The policy lives in one TOML file, [`src-tauri/crates/scan-policy/policy/macos.toml`](src-tauri/crates/scan-policy/policy/macos.toml), with an id, a reason and a safety level per rule. Read it, argue with it, send a pull request.
@@ -158,7 +157,7 @@ bun tauri build         # .app and .dmg under src-tauri/target/release/bundle
 <!-- USAGE -->
 ## Usage
 
-1. **Pick what to scan.** The sidebar lists your volumes. Choose one, or pick a folder, and press scan. A full disk takes about a minute on the first run.
+1. **Pick what to scan.** The sidebar lists your volumes. Choose one, or pick a folder, and press scan. How long a full disk takes depends on its size and file count; the first run is the slowest, since nothing is cached yet.
 2. **Explore.** Click a ring to look inside it. Click the centre to go back up. Hover for sizes, switch between sunburst, treemap, shelf and orbit, or open the list panel for the exact numbers.
 3. **Collect.** Drag items into the bin at the bottom, or tick them. Jump to **Largest files** or **Suggestions** to find candidates faster. "Add all safe items" fills the bin with everything the policy marks safe.
 4. **Review and free up.** Open the review sheet, read the total, confirm. Items go to the Trash and the chart updates in place.
@@ -216,7 +215,7 @@ Releases are built, signed, notarized and published to GitHub Releases by the **
 ## Roadmap
 
 - [x] Rust scan core with arena, hard-link dedup and a jwalk reference walker
-- [x] `getattrlistbulk` walker with in-scan aggregation, faster than dua-cli and DaisyDisk
+- [x] `getattrlistbulk` walker with in-scan aggregation, faster than dua-cli
 - [x] Tauri app with live progress, bounded binary views and the sunburst
 - [x] Full Disk Access detection and banner
 - [x] Cleanup policy, collector bin, review sheet and Trash
