@@ -109,6 +109,9 @@ pub fn walk(cfg: &ScanConfig, progress: &Progress, cancel: &Cancel, links: &Hard
 
         if ft.is_dir() {
             flags |= Flags::DIR;
+            // A directory's own allocation (4 KiB on ext4, 0 on APFS) is not content: the bulk
+            // walker and `list_dir` record directories at 0, and aggregation fills in the total.
+            size = 0;
             batch.dirs += 1;
             if meta.mount {
                 flags |= Flags::MOUNT;
