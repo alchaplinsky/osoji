@@ -56,6 +56,8 @@ export default function App() {
   const totals = useScanTotals();
   /** The finished scan's breakdown has taken over (or failed to load), so the scan screen rests instead of holding 100%. */
   const [handedOff, setHandedOff] = useState(false);
+  /** Bumped on every scan status change; a hand-off whose number has moved on does nothing. */
+  const handoff = useRef(0);
   const [hoverId, setHoverId] = useState<HoverId>(null);
   const [listOpen, setListOpen] = useState(true);
   const [review, setReview] = useState(false);
@@ -100,6 +102,10 @@ export default function App() {
   // the ring at rest for a frame and restart its easing from zero, cutting the 100% rest short.
   const finishing = scan.status === "done" && scan.summary !== null && !scan.summary.cancelled && !handedOff;
   useEffect(() => {
+    // Any status change (a new scan, a root change, a stop) retires the hand-off in flight, so it
+    // cannot switch to the breakdown or mark a later scan as handed off from a stale callback.
+    const gen = ++handoff.current;
+    const current = () => gen === handoff.current;
     if (scan.status === "scanning") {
       setHandedOff(false);
       reset();
@@ -113,12 +119,14 @@ export default function App() {
       if (completed) remember(done.root, { bytes: done.bytes, entries: done.entries });
       const settle = new Promise((resolve) => setTimeout(resolve, completed ? SCAN_SETTLE_MS : 0));
       // The breakdown needs only the root view. The rest feeds other screens and badges, and the
-      // slowest of it (suggestions, largest files) passes over every node, so it loads behind the chart.
-      Promise.all([load(0), settle])
-        .then(() => setScreen("breakdown"))
+      // slowest of it (suggestions, largest files) passes over every node. Every read takes the
+      // same scan lock, so the rest starts only once the root view is back, never ahead of it.
+      const view = load(0);
+      view.then(() => (current() ? Promise.all([loadInsights(), refreshWatchers(), loadTrash()]) : undefined)).catch(console.error);
+      Promise.all([view, settle])
+        .then(() => current() && setScreen("breakdown"))
         .catch(console.error)
-        .finally(() => setHandedOff(true));
-      Promise.all([loadInsights(), refreshWatchers(), loadTrash()]).catch(console.error);
+        .finally(() => current() && setHandedOff(true));
     }
   }, [scan.status, scan.summary, load, reset, loadInsights, resetInsights, refreshWatchers, resetWatchers, clearBin, remember, loadTrash]);
 
