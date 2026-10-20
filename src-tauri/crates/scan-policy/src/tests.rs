@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 const NOW: i64 = 1_700_000_000;
 const DAY: i64 = 86_400;
 const HOME: &str = "/Users/alex";
+const LINUX_HOME: &str = "/home/alex";
 
 pub(crate) struct Fixture {
     pub arena: Arena,
@@ -45,11 +46,41 @@ const NODES: &[(&str, u64, i64, bool)] = &[
     ("/Users/alex/Photos.photoslibrary", 700, 1, true),
 ];
 
+/// A Linux-shaped scan for the Linux policy; `(path, size, age in days, dir)`, parents before children.
+const LINUX_NODES: &[(&str, u64, i64, bool)] = &[
+    ("/usr", 0, 1, true),
+    ("/weird", 0, 1, true),
+    ("/home", 0, 1, true),
+    ("/home/bob", 0, 1, true),
+    ("/home/alex", 0, 1, true),
+    ("/home/alex/.ssh", 1, 1, true),
+    ("/home/alex/.cache", 0, 1, true),
+    ("/home/alex/.cache/pip", 300, 1, true),
+    ("/home/alex/.local", 0, 1, true),
+    ("/home/alex/.local/share", 0, 1, true),
+    ("/home/alex/.local/share/Trash", 0, 1, true),
+    ("/home/alex/.local/share/Trash/files", 0, 1, true),
+    ("/home/alex/.local/share/Trash/files/big.iso", 600_000_000, 400, false),
+    ("/home/alex/proj", 0, 1, true),
+    ("/home/alex/proj/node_modules", 200, 1, true),
+    ("/home/alex/Downloads", 0, 1, true),
+    ("/home/alex/Downloads/old.iso", 900, 400, false),
+    ("/home/alex/Downloads/new.iso", 900, 2, false),
+];
+
 pub(crate) fn fixture() -> Fixture {
+    build(NODES)
+}
+
+fn linux_fixture() -> Fixture {
+    build(LINUX_NODES)
+}
+
+fn build(nodes: &[(&'static str, u64, i64, bool)]) -> Fixture {
     let mut arena = Arena::default();
     let root = arena.push(NONE, b"/", 0, NOW, Flags::DIR);
     let mut ids = vec![("/", root)];
-    for &(path, size, age, dir) in NODES {
+    for &(path, size, age, dir) in nodes {
         let (parent, name) = path.rsplit_once('/').unwrap();
         let parent = if parent.is_empty() { root } else { ids.iter().find(|(p, _)| *p == parent).unwrap().1 };
         let mtime = if age == 0 { 0 } else { NOW - age * DAY };
@@ -61,8 +92,29 @@ pub(crate) fn fixture() -> Fixture {
     Fixture { arena, index, ids }
 }
 
+/// A context with the default data directory, independent of this process's environment.
+fn context(home: &str) -> PolicyContext {
+    PolicyContext { home: PathBuf::from(home), now: NOW, data_home: Path::new(home).join(".local/share") }
+}
+
 pub(crate) fn ctx() -> PolicyContext {
-    PolicyContext { home: PathBuf::from(HOME), now: NOW }
+    context(HOME)
+}
+
+fn linux_ctx() -> PolicyContext {
+    context(LINUX_HOME)
+}
+
+/// `(path, rule id)` for every cleanup match of `policy` in the fixture, ordered by path.
+fn cleanup_rule_ids(policy: &Policy, f: &Fixture, ctx: &PolicyContext) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = policy
+        .resolve(&f.arena, &f.index, ctx)
+        .cleanup_matches(&f.arena)
+        .into_iter()
+        .map(|(id, rule)| (f.arena.path(id).to_string_lossy().into_owned(), policy.rule(rule).id.clone()))
+        .collect();
+    out.sort();
+    out
 }
 
 fn rule_toml(kind: &str, matcher: &str) -> String {
@@ -97,9 +149,73 @@ fn bundled_policies_load() {
     assert!(macos.rules().iter().all(|r| (r.kind == Kind::Cleanup) == r.safety.is_some()));
     assert!(macos.rules().iter().any(|r| r.kind == Kind::Unexpected));
     assert!(macos.rules().iter().any(|r| r.id == "home"));
-    assert!(Policy::from_toml(LINUX).unwrap().rules().is_empty());
+    let linux = Policy::from_toml(LINUX).unwrap();
+    assert_eq!(linux.rules().iter().filter(|r| r.kind == Kind::Trash).count(), 1);
+    assert!(linux.rules().iter().all(|r| (r.kind == Kind::Cleanup) == r.safety.is_some()));
+    assert!(linux.rules().iter().any(|r| r.kind == Kind::Unexpected));
+    assert!(linux.rules().iter().any(|r| r.id == "home"));
+    let ids: std::collections::HashSet<&str> = linux.rules().iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(ids.len(), linux.rules().len());
     assert!(Policy::from_toml(WINDOWS).unwrap().rules().is_empty());
     assert!(Policy::for_current_os().is_ok());
+}
+
+#[test]
+fn linux_stamps_system_folders_keys_and_the_trash() {
+    let mut f = linux_fixture();
+    let policy = Policy::from_toml(LINUX).unwrap();
+    let hits = policy.resolve(&f.arena, &f.index, &linux_ctx()).stamp(&mut f.arena);
+    let flags = |p: &str| f.arena.flags[f.id(p) as usize];
+    let rule_id = |p: &str| hits.rule(f.id(p)).map(|i| policy.rule(i).id.as_str());
+
+    for p in ["/usr", "/home", LINUX_HOME, "/home/alex/.ssh"] {
+        assert!(flags(p).contains(Flags::PROTECTED), "{p}");
+        assert!(!flags(p).contains(Flags::RISKY), "{p}");
+    }
+    let trash = "/home/alex/.local/share/Trash";
+    assert_eq!(rule_id(trash), Some("trash"));
+    assert_eq!(policy.rule(hits.rule(f.id(trash)).unwrap()).kind, Kind::Trash);
+    assert!(flags(trash).contains(Flags::TRASH_FOLDER | Flags::PROTECTED));
+    assert_eq!(f.arena.count_flag(Flags::TRASH_FOLDER), 1);
+
+    assert_eq!(rule_id("/home/alex/.local/share"), Some("local-share"));
+    assert!(flags("/home/alex/.local/share").contains(Flags::RISKY));
+    assert_eq!(rule_id("/home/bob"), Some("other-user-home"));
+    assert_eq!(rule_id("/weird"), Some("unknown-top-level"));
+    assert_eq!(hits.rule(f.id("/home/alex/proj")), None);
+}
+
+#[test]
+fn linux_suggests_cache_contents_and_node_modules_but_nothing_in_the_trash() {
+    let mut f = linux_fixture();
+    let policy = Policy::from_toml(LINUX).unwrap();
+    let found = cleanup_rule_ids(&policy, &f, &linux_ctx());
+    let rule_for = |p: &str| found.iter().find(|(path, _)| path == p).map(|(_, r)| r.as_str());
+
+    assert_eq!(rule_for("/home/alex/.cache/pip"), Some("app-cache"));
+    assert_eq!(rule_for("/home/alex/.cache"), None);
+    assert_eq!(rule_for("/home/alex/proj/node_modules"), Some("node-modules"));
+
+    // The Trash's contents match by size and age, but the stamped Trash folder holds them closed.
+    let in_trash = "/home/alex/.local/share/Trash/files/big.iso";
+    assert_eq!(rule_for(in_trash), Some("large-old-file"));
+    let resolved = policy.resolve(&f.arena, &f.index, &linux_ctx());
+    resolved.stamp(&mut f.arena);
+    let matches = resolved.cleanup_matches(&f.arena);
+    let kept = covering(&f.arena, matches, |p| f.arena.flags[p as usize].contains(Flags::TRASH_FOLDER));
+    assert!(kept.iter().all(|&(id, _)| id != f.id(in_trash)));
+    assert!(kept.iter().any(|&(id, _)| id == f.id("/home/alex/.cache/pip")));
+}
+
+#[test]
+fn linux_suggests_only_old_downloads() {
+    let f = linux_fixture();
+    let policy = Policy::from_toml(LINUX).unwrap();
+    let found = cleanup_rule_ids(&policy, &f, &linux_ctx());
+    let rule_for = |p: &str| found.iter().find(|(path, _)| path == p).map(|(_, r)| r.as_str());
+    assert_eq!(rule_for("/home/alex/Downloads/old.iso"), Some("old-download"));
+    assert_eq!(rule_for("/home/alex/Downloads/new.iso"), None);
+    assert_eq!(rule_for("/home/alex/Downloads"), None);
 }
 
 #[test]
@@ -147,11 +263,59 @@ fn rejects_empty_match_relative_paths_and_bad_values() {
 
 #[test]
 fn expands_tilde_to_home() {
-    let home = Path::new(HOME);
-    assert_eq!(expand("~", home), Some(PathBuf::from(HOME)));
-    assert_eq!(expand("~/Library/Caches", home), Some(PathBuf::from("/Users/alex/Library/Caches")));
-    assert_eq!(expand("/System", home), Some(PathBuf::from("/System")));
-    assert_eq!(expand("~/Library", Path::new("")), None);
+    let (home, data) = (Path::new(HOME), Path::new("/Users/alex/.local/share"));
+    assert_eq!(expand("~", home, data), Some(PathBuf::from(HOME)));
+    assert_eq!(expand("~/Library/Caches", home, data), Some(PathBuf::from("/Users/alex/Library/Caches")));
+    assert_eq!(expand("/System", home, data), Some(PathBuf::from("/System")));
+    assert_eq!(expand("~/Library", Path::new(""), data), None);
+}
+
+#[test]
+fn expands_xdg_data_home_to_the_data_directory() {
+    let (home, data) = (Path::new("/home/alex"), Path::new("/srv/xdg"));
+    assert_eq!(expand("$XDG_DATA_HOME", home, data), Some(PathBuf::from("/srv/xdg")));
+    assert_eq!(expand("$XDG_DATA_HOME/Trash", home, data), Some(PathBuf::from("/srv/xdg/Trash")));
+    assert_eq!(expand("$XDG_DATA_HOME/Trash", home, Path::new("")), None);
+
+    let unset = crate::lookup::data_home_from(home, None);
+    assert_eq!(unset, PathBuf::from("/home/alex/.local/share"));
+    assert_eq!(crate::lookup::data_home_from(home, Some(std::ffi::OsStr::new("/srv/xdg"))), PathBuf::from("/srv/xdg"));
+    // The spec says a relative or empty value must be ignored.
+    assert_eq!(crate::lookup::data_home_from(home, Some(std::ffi::OsStr::new("xdg"))), unset);
+    assert_eq!(crate::lookup::data_home_from(home, Some(std::ffi::OsStr::new(""))), unset);
+}
+
+#[test]
+fn linux_trash_follows_a_custom_xdg_data_home() {
+    let mut f = build(&[
+        ("/home", 0, 1, true),
+        ("/home/alex", 0, 1, true),
+        ("/home/alex/.local", 0, 1, true),
+        ("/home/alex/.local/share", 0, 1, true),
+        ("/home/alex/.local/share/Trash", 0, 1, true),
+        ("/home/alex/.local/share/gnome", 0, 1, true),
+        ("/srv", 0, 1, true),
+        ("/srv/xdg", 0, 1, true),
+        ("/srv/xdg/Trash", 0, 1, true),
+        ("/srv/xdg/gnome", 0, 1, true),
+        ("/srv/xdg/flatpak", 0, 1, true),
+    ]);
+    let policy = Policy::from_toml(LINUX).unwrap();
+    let ctx = PolicyContext { home: PathBuf::from(LINUX_HOME), now: NOW, data_home: PathBuf::from("/srv/xdg") };
+    let hits = policy.resolve(&f.arena, &f.index, &ctx).stamp(&mut f.arena);
+    let rule_id = |p: &str| hits.rule(f.id(p)).map(|i| policy.rule(i).id.as_str());
+
+    // Every rule about the data directory follows it: the Trash, the directory itself, its children.
+    assert!(f.arena.flags[f.id("/srv/xdg/Trash") as usize].contains(Flags::TRASH_FOLDER));
+    assert_eq!(rule_id("/srv/xdg"), Some("local-share"));
+    assert_eq!(rule_id("/srv/xdg/gnome"), Some("app-data"));
+    let found = cleanup_rule_ids(&policy, &f, &ctx);
+    assert!(found.iter().any(|(p, r)| p == "/srv/xdg/flatpak" && r == "flatpak-user"));
+
+    // The default location is just another folder now.
+    assert!(!f.arena.flags[f.id("/home/alex/.local/share/Trash") as usize].contains(Flags::TRASH_FOLDER));
+    assert_eq!(rule_id("/home/alex/.local/share"), None);
+    assert_eq!(rule_id("/home/alex/.local/share/gnome"), None);
 }
 
 #[test]
@@ -342,7 +506,7 @@ fn trash_rules_protect_the_folder_and_win_over_protected() {
 fn skips_home_rules_without_a_home() {
     let mut f = fixture();
     let policy = Policy::from_toml(MACOS).unwrap();
-    let ctx = PolicyContext { home: PathBuf::new(), now: NOW };
+    let ctx = PolicyContext::new(PathBuf::new(), NOW);
     policy.resolve(&f.arena, &f.index, &ctx).stamp(&mut f.arena);
     assert!(f.arena.flags[f.id("/System") as usize].contains(Flags::PROTECTED));
     assert!(!f.arena.flags[f.id(HOME) as usize].contains(Flags::PROTECTED));

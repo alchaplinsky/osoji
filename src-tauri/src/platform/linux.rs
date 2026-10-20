@@ -70,10 +70,11 @@ pub fn reveal(path: &Path) -> Result<(), String> {
     std::process::Command::new("xdg-open").arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
-/// Open the user's Trash folder in the file manager.
+/// Open the user's Trash folder in the file manager: `$XDG_DATA_HOME/Trash`, the same place the
+/// policy's trash rule points at.
 pub fn show_trash(home: &Path) -> Result<(), String> {
     std::process::Command::new("xdg-open")
-        .arg(home.join(".local/share/Trash/files"))
+        .arg(scan_policy::xdg_data_home(home).join("Trash/files"))
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())

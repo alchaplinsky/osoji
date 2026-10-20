@@ -1,9 +1,9 @@
-use crate::lookup::{expand, find_node};
+use crate::lookup::{expand, find_node, xdg_data_home};
 use crate::schema::{Kind, Rule};
 use scan_core::{Arena, ChildIndex, Flags, NodeId, NONE};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 const DAY: i64 = 86_400;
 
@@ -11,6 +11,21 @@ pub struct PolicyContext {
     pub home: PathBuf,
     /// Unix seconds, compared against node mtimes.
     pub now: i64,
+    /// What `$XDG_DATA_HOME` in a rule path stands for: the user's XDG data directory.
+    pub data_home: PathBuf,
+}
+
+impl PolicyContext {
+    /// With `data_home` taken from the environment (`xdg_data_home`).
+    pub fn new(home: PathBuf, now: i64) -> Self {
+        let data_home = xdg_data_home(&home);
+        Self { home, now, data_home }
+    }
+
+    /// A rule path made absolute: `~` is the home, `$XDG_DATA_HOME` the data directory.
+    pub fn expand(&self, path: &str) -> Option<PathBuf> {
+        expand(path, &self.home, &self.data_home)
+    }
 }
 
 /// Which nodes a rule can match, narrowest first.
@@ -116,11 +131,16 @@ fn fold(v: &mut Verdict, rule: usize, kind: Kind) {
     }
 }
 
-fn resolve_path(arena: &Arena, index: &ChildIndex, home: &Path, path: &Option<String>) -> Result<Option<NodeId>, ()> {
+fn resolve_path(
+    arena: &Arena,
+    index: &ChildIndex,
+    ctx: &PolicyContext,
+    path: &Option<String>,
+) -> Result<Option<NodeId>, ()> {
     let Some(path) = path else {
         return Ok(None);
     };
-    let id = expand(path, home).map_or(NONE, |p| find_node(arena, index, &p));
+    let id = ctx.expand(path).map_or(NONE, |p| find_node(arena, index, &p));
     if id == NONE {
         Err(())
     } else {
@@ -129,9 +149,14 @@ fn resolve_path(arena: &Arena, index: &ChildIndex, home: &Path, path: &Option<St
 }
 
 /// Like `resolve_path`, but a scan rooted inside `under` is all under it, so the condition drops.
-fn resolve_under(arena: &Arena, index: &ChildIndex, home: &Path, under: &Option<String>) -> Result<Option<NodeId>, ()> {
-    let inside = |p: &String| !arena.is_empty() && expand(p, home).is_some_and(|p| arena.path(0).starts_with(p));
-    match resolve_path(arena, index, home, under) {
+fn resolve_under(
+    arena: &Arena,
+    index: &ChildIndex,
+    ctx: &PolicyContext,
+    under: &Option<String>,
+) -> Result<Option<NodeId>, ()> {
+    let inside = |p: &String| !arena.is_empty() && ctx.expand(p).is_some_and(|p| arena.path(0).starts_with(p));
+    match resolve_path(arena, index, ctx, under) {
         Err(()) if under.as_ref().is_some_and(inside) => Ok(None),
         other => other,
     }
@@ -145,13 +170,13 @@ fn compile<'a>(
     ctx: &PolicyContext,
 ) -> Option<Compiled<'a>> {
     let m = &rule.matcher;
-    let at = |p| resolve_path(arena, index, &ctx.home, p).ok();
+    let at = |p| resolve_path(arena, index, ctx, p).ok();
     Some(Compiled {
         rule: idx,
         kind: rule.kind,
         path: at(&m.path)?,
         parent: at(&m.parent)?,
-        under: resolve_under(arena, index, &ctx.home, &m.under).ok()?,
+        under: resolve_under(arena, index, ctx, &m.under).ok()?,
         name: m.name.as_deref().map(str::as_bytes),
         suffix: m.suffix.as_deref().map(str::as_bytes),
         prefix: m.prefix.as_deref().map(str::as_bytes),
@@ -159,7 +184,7 @@ fn compile<'a>(
         not_at: m
             .not_path
             .iter()
-            .filter_map(|p| expand(p, &ctx.home))
+            .filter_map(|p| ctx.expand(p))
             .map(|p| find_node(arena, index, &p))
             .filter(|&id| id != NONE)
             .collect(),

@@ -1,1 +1,354 @@
 version = 1
+
+# Protected: never moved to the Trash.
+
+[[rule]]
+id = "usr"
+kind = "protected"
+reason = "Part of Linux. Installed programs and libraries live here."
+match = { path = "/usr" }
+
+[[rule]]
+id = "bin"
+kind = "protected"
+reason = "Part of Linux. Core command-line tools live here."
+match = { path = "/bin" }
+
+[[rule]]
+id = "sbin"
+kind = "protected"
+reason = "Part of Linux. System administration tools live here."
+match = { path = "/sbin" }
+
+[[rule]]
+id = "lib"
+kind = "protected"
+reason = "Part of Linux. Shared libraries and kernel modules live here."
+match = { path = "/lib" }
+
+[[rule]]
+id = "lib64"
+kind = "protected"
+reason = "Part of Linux. Shared libraries live here."
+match = { path = "/lib64" }
+
+[[rule]]
+id = "etc"
+kind = "protected"
+reason = "Part of Linux. System configuration lives here."
+match = { path = "/etc" }
+
+[[rule]]
+id = "boot"
+kind = "protected"
+reason = "The kernel and boot loader. The system cannot start without it."
+match = { path = "/boot" }
+
+[[rule]]
+id = "proc"
+kind = "protected"
+reason = "A view of running programs. It holds no real files."
+match = { path = "/proc" }
+
+[[rule]]
+id = "sys"
+kind = "protected"
+reason = "A view of hardware and drivers. It holds no real files."
+match = { path = "/sys" }
+
+[[rule]]
+id = "dev"
+kind = "protected"
+reason = "Part of Linux. Devices appear here; it holds no real files."
+match = { path = "/dev" }
+
+[[rule]]
+id = "run"
+kind = "protected"
+reason = "Files for programs running right now. Cleared at every boot."
+match = { path = "/run" }
+
+[[rule]]
+id = "var"
+kind = "protected"
+reason = "Part of Linux. System logs, caches and service data live here."
+match = { path = "/var" }
+
+[[rule]]
+id = "var-lib"
+kind = "protected"
+reason = "Data for installed services and package managers, such as Docker, Flatpak and apt."
+match = { path = "/var/lib" }
+
+[[rule]]
+id = "var-log"
+kind = "protected"
+reason = "System logs. Tools such as journalctl and logrotate manage these."
+match = { path = "/var/log" }
+
+[[rule]]
+id = "tmp"
+kind = "protected"
+reason = "Part of Linux. Apps use it for files they are working on right now."
+match = { path = "/tmp" }
+
+[[rule]]
+id = "snap"
+kind = "protected"
+reason = "Installed Snap apps. Remove single apps with snap instead."
+match = { path = "/snap" }
+
+[[rule]]
+id = "opt"
+kind = "protected"
+reason = "Installed software that did not come from the package manager."
+match = { path = "/opt" }
+
+[[rule]]
+id = "root"
+kind = "protected"
+reason = "The administrator's home folder."
+match = { path = "/root" }
+
+[[rule]]
+id = "home-root"
+kind = "protected"
+reason = "Every user's home folder lives here."
+match = { path = "/home" }
+
+[[rule]]
+id = "home"
+kind = "protected"
+reason = "Your home folder. Everything you own lives here."
+match = { path = "~" }
+
+[[rule]]
+id = "ssh"
+kind = "protected"
+reason = "Your SSH keys. Without them you lose access to servers and Git remotes."
+match = { path = "~/.ssh" }
+
+[[rule]]
+id = "gnupg"
+kind = "protected"
+reason = "Your GPG keys. Without them you cannot decrypt or sign anything."
+match = { path = "~/.gnupg" }
+
+[[rule]]
+id = "trash"
+kind = "trash"
+reason = "Already in the Trash. Empty the Trash from your file manager to reclaim the space."
+match = { path = "$XDG_DATA_HOME/Trash", dir = true }
+
+# Risky: allowed, but the review asks twice.
+
+[[rule]]
+id = "desktop"
+kind = "risky"
+reason = "Your personal files. Remove items inside it instead of the whole folder."
+match = { path = "~/Desktop" }
+
+[[rule]]
+id = "documents"
+kind = "risky"
+reason = "Your personal files. Remove items inside it instead of the whole folder."
+match = { path = "~/Documents" }
+
+[[rule]]
+id = "downloads"
+kind = "risky"
+reason = "Your personal files. Remove items inside it instead of the whole folder."
+match = { path = "~/Downloads" }
+
+[[rule]]
+id = "pictures"
+kind = "risky"
+reason = "Your personal files. Remove items inside it instead of the whole folder."
+match = { path = "~/Pictures" }
+
+[[rule]]
+id = "videos"
+kind = "risky"
+reason = "Your personal files. Remove items inside it instead of the whole folder."
+match = { path = "~/Videos" }
+
+[[rule]]
+id = "music"
+kind = "risky"
+reason = "Your personal files. Remove items inside it instead of the whole folder."
+match = { path = "~/Music" }
+
+[[rule]]
+id = "public"
+kind = "risky"
+reason = "Your personal files. Remove items inside it instead of the whole folder."
+match = { path = "~/Public" }
+
+[[rule]]
+id = "config"
+kind = "risky"
+reason = "Settings for all your apps. Remove single apps' folders inside it instead."
+match = { path = "~/.config" }
+
+[[rule]]
+id = "local-share"
+kind = "risky"
+reason = "Data for all your apps, and the Trash. Remove single apps' folders inside it instead."
+match = { path = "$XDG_DATA_HOME" }
+
+[[rule]]
+id = "local-bin"
+kind = "risky"
+reason = "Programs installed just for you."
+match = { path = "~/.local/bin" }
+
+[[rule]]
+id = "mozilla"
+kind = "risky"
+reason = "Your Firefox profiles: bookmarks, passwords and history."
+match = { path = "~/.mozilla" }
+
+[[rule]]
+id = "thunderbird"
+kind = "risky"
+reason = "Your Thunderbird profiles: email and accounts."
+match = { path = "~/.thunderbird" }
+
+[[rule]]
+id = "app-data"
+kind = "risky"
+reason = "App data. The app may lose its settings or documents."
+match = { parent = "$XDG_DATA_HOME" }
+
+# Cleanup: what Suggestions offers. The first matching rule wins, and a match stands for everything
+# inside it. `{age}` and `{size}` in a reason are filled in per item.
+
+[[rule]]
+id = "app-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "App cache. Rebuilt automatically the next time the app runs."
+match = { parent = "~/.cache" }
+
+[[rule]]
+id = "flatpak-app-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "Flatpak app cache. Rebuilt automatically the next time the app runs."
+match = { under = "~/.var/app", name = "cache", dir = true }
+
+[[rule]]
+id = "snap-app-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "Snap app cache. Rebuilt automatically the next time the app runs."
+match = { under = "~/snap", name = ".cache", dir = true }
+
+[[rule]]
+id = "node-modules"
+kind = "cleanup"
+safety = "safe"
+reason = "Installed packages. Reinstalled by npm, pnpm or bun the next time you run install."
+match = { name = "node_modules", dir = true }
+
+[[rule]]
+id = "cargo-target"
+kind = "cleanup"
+safety = "safe"
+reason = "Rust build output. Rebuilt by cargo."
+match = { name = "target", dir = true, sibling = "Cargo.toml" }
+
+# Review, not safe: the matcher cannot check for the pyvenv.cfg inside, and a folder by this
+# name may hold anything. The plain "venv" name is too generic to suggest at all.
+[[rule]]
+id = "python-venv"
+kind = "cleanup"
+safety = "review"
+reason = "Probably a Python virtual environment, recreated by your project's setup step. Check before removing."
+match = { name = ".venv", dir = true }
+
+[[rule]]
+id = "pycache"
+kind = "cleanup"
+safety = "safe"
+reason = "Python bytecode cache. Rebuilt automatically the next time the code runs."
+match = { name = "__pycache__", dir = true }
+
+[[rule]]
+id = "npm-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "Package manager cache. Downloaded again when needed."
+match = { path = "~/.npm/_cacache", dir = true }
+
+[[rule]]
+id = "cargo-registry"
+kind = "cleanup"
+safety = "safe"
+reason = "Downloaded Rust crates. Downloaded again by cargo when needed."
+match = { path = "~/.cargo/registry", dir = true }
+
+[[rule]]
+id = "gradle-cache"
+kind = "cleanup"
+safety = "safe"
+reason = "Package manager cache. Downloaded again when needed."
+match = { path = "~/.gradle/caches", dir = true }
+
+[[rule]]
+id = "rustup-toolchains"
+kind = "cleanup"
+safety = "review"
+reason = "Installed Rust toolchains. Reinstalled by rustup, but every toolchain you use goes with them."
+match = { path = "~/.rustup/toolchains", dir = true }
+
+[[rule]]
+id = "maven-repo"
+kind = "cleanup"
+safety = "review"
+reason = "Downloaded Java packages. Maven downloads them again, which can take a while."
+match = { path = "~/.m2/repository", dir = true }
+
+[[rule]]
+id = "flatpak-user"
+kind = "cleanup"
+safety = "review"
+reason = "Flatpak apps installed just for you, and their runtimes. Remove single apps with flatpak instead."
+match = { path = "$XDG_DATA_HOME/flatpak", dir = true }
+
+[[rule]]
+id = "old-download"
+kind = "cleanup"
+safety = "review"
+reason = "In Downloads for {age}, and probably already used."
+match = { parent = "~/Downloads", older_than_days = 90 }
+
+[[rule]]
+id = "large-old-file"
+kind = "cleanup"
+safety = "review"
+reason = "Large file not modified in {age}."
+match = { dir = false, min_bytes = 524288000, older_than_days = 180 }
+
+# Unexpected: nothing to remove, just worth a look. A stronger rule on the same node wins.
+
+[[rule]]
+id = "unknown-top-level"
+kind = "unexpected"
+reason = "Not a standard Linux top-level folder. Worth checking what put it there."
+match = { parent = "/", dir = true, not_named = [
+  "bin", "boot", "dev", "etc", "home", "lib", "lib32", "lib64", "libx32", "media", "mnt", "opt", "proc",
+  "root", "run", "sbin", "snap", "srv", "sys", "tmp", "usr", "var", "lost+found", ".snapshots",
+] }
+
+[[rule]]
+id = "large-hidden-home-folder"
+kind = "unexpected"
+reason = "A hidden folder in your home that has grown large."
+match = { parent = "~", prefix = ".", dir = true, min_bytes = 5368709120, not_named = [".cache", ".local"] }
+
+[[rule]]
+id = "other-user-home"
+kind = "unexpected"
+reason = "Another user account's home folder, or a leftover from one."
+match = { parent = "/home", dir = true, not_named = ["lost+found"], not_path = ["~"] }

@@ -45,7 +45,8 @@ impl Safety {
 }
 
 /// Conditions a node must meet for a rule to apply. Every field that is set must hold.
-/// `path`, `parent`, `under` and `not_path` are absolute, or start with `~` for the home folder.
+/// `path`, `parent`, `under` and `not_path` are absolute, or start with `~` for the home folder
+/// or `$XDG_DATA_HOME` for the user's XDG data directory (`~/.local/share` unless overridden).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Match {
@@ -157,8 +158,11 @@ fn validate(rule: &Rule) -> Result<(), String> {
         return Err("`match` needs at least one field".into());
     }
     for (field, value) in rule.matcher.paths() {
-        if !(value.starts_with('/') || value == "~" || value.starts_with("~/")) {
-            return Err(format!("`match.{field}` must be absolute or start with `~/`, got {value:?}"));
+        let anchored = ["~", "$XDG_DATA_HOME"].iter().any(|base| value == *base || value.starts_with(&format!("{base}/")));
+        if !(value.starts_with('/') || anchored) {
+            return Err(format!(
+                "`match.{field}` must be absolute or start with `~/` or `$XDG_DATA_HOME/`, got {value:?}"
+            ));
         }
     }
     Ok(())
