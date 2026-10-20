@@ -35,7 +35,7 @@ for t in "${THREADS[@]}"; do
       end=$(python3 -c 'import time;print(time.time())')
       rss=$(echo "$line" | awk '/maximum resident/ {print $1}')
       ms=$(python3 -c "print(round(($end-$start)*1000,1))")
-      mb=$(python3 -c "print(round($rss/1048576,1))")
+      mb=$(python3 -c "print(round($rss/1000000,1))")   # decimal MB, as scan-cli reports its own
       echo "{\"walker\":\"dua\",\"threads\":$t,\"elapsed_ms\":$ms,\"max_rss_mb\":$mb}" | tee -a "$OUT" >&2
     done
   fi
