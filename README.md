@@ -12,7 +12,7 @@
   <p align="center">
     See what fills your Mac. Clean it up without fear.
     <br />
-    An open-source disk explorer and cleaner for macOS, with a sunburst that scans a full disk in about 30 seconds.
+    An open-source disk explorer and cleaner for macOS, with a sunburst and a high-performance scanner built to keep full-disk scans short.
     <br />
     <br />
     <a href="https://github.com/alchaplinsky/osoji/releases/latest"><strong>Download the latest release »</strong></a>
@@ -58,7 +58,7 @@
 
 Osoji (お掃除, "cleaning") shows your disk as a sunburst you can click into, ring by ring, until you find what is actually taking the space. Then it tells you what is safe to remove, what is worth a look, and what it would keep, and it moves the rest to the Trash for you.
 
-It exists because the good disk visualisers for the Mac are closed source and the open ones are slow or ugly. Osoji is neither. Its scanner is written in Rust on top of the same low-level `getattrlistbulk` call that Finder uses, so a full disk with ten million files is on screen in about half a minute, and the whole app is yours to read, fork and fix.
+It exists because the good disk visualisers for the Mac are closed source and the open ones are slow or ugly. Osoji is neither. Its scanner is written in Rust on top of the same low-level `getattrlistbulk` call that Finder uses, so even a full disk with millions of files is on screen quickly, and the whole app is yours to read, fork and fix.
 
 **What makes it different**
 
@@ -158,7 +158,7 @@ bun tauri build         # .app and .dmg under src-tauri/target/release/bundle
 <!-- USAGE -->
 ## Usage
 
-1. **Pick what to scan.** The sidebar lists your volumes. Choose one, or pick a folder, and press scan. A full disk takes about a minute on the first run.
+1. **Pick what to scan.** The sidebar lists your volumes. Choose one, or pick a folder, and press scan. How long a full disk takes depends on its size and file count; the first run is the slowest, since nothing is cached yet.
 2. **Explore.** Click a ring to look inside it. Click the centre to go back up. Hover for sizes, switch between sunburst, treemap, shelf and orbit, or open the list panel for the exact numbers.
 3. **Collect.** Drag items into the bin at the bottom, or tick them. Jump to **Largest files** or **Suggestions** to find candidates faster. "Add all safe items" fills the bin with everything the policy marks safe.
 4. **Review and free up.** Open the review sheet, read the total, confirm. Items go to the Trash and the chart updates in place.
