@@ -66,7 +66,7 @@ It exists because the good disk visualisers for the Mac are closed source and th
 - **Stays current while it is open.** An FSEvents watcher keeps the finished scan in sync with the disk. Build a project, empty a cache, trash a folder, and the chart updates. No rescan.
 - **Suggestions you can trust.** A readable policy file decides what is safe, what needs review, and what must never be touched. Every suggestion comes with a reason and the bytes it frees.
 - **Nothing goes until you review.** Items collect in a bin. You confirm the total. Everything goes to the macOS Trash, never to oblivion.
-- **Small.** Around 26 bytes of memory per file, names included. A nine-million-entry home folder fits in roughly 235 MB.
+- **Small.** Around 26 bytes of memory per file, names included. An 8.9-million-entry home folder fits in 236 MB.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -75,12 +75,12 @@ It exists because the good disk visualisers for the Mac are closed source and th
 
 - **Four ways to look at a folder.** Sunburst, treemap, shelf and orbit views, with breadcrumbs, hover labels and a list panel for the current ring.
 - **Breakdown.** A capacity bar for the disk with Users, Applications, System, Library and friends, plus Free and Not scanned so the numbers add up to what Finder reports.
-- **Largest files.** The biggest files on the disk, filterable to the ones that are safe to drop or have not been touched in months.
+- **Largest files.** The biggest files on the disk, filterable to the ones that are safe to remove or over a year old.
 - **Suggestions.** Developer caches (`node_modules`, `target/`, DerivedData, iOS DeviceSupport, Gradle, npm, cargo, bun), app caches, old downloads, large stale files, Docker disk images and virtual machines, grouped as *Safe to remove*, *Worth a look* and *We would keep these*. A *Worth knowing* group flags things that are usually not there, like an unknown top-level folder or another user's home.
 - **Watchers.** Keep an eye on folders that tend to grow, such as Downloads or a caches folder, and set a size limit for each.
 - **Scan any disk or folder.** Pick a volume or a folder in the sidebar. The chart's centre is whatever you picked.
 - **Full Disk Access aware.** Without it, Osoji still scans everything it can, shows a lock on what it could not read, and offers a one-click jump to the right System Settings pane.
-- **Reveal in Finder, open the Trash, put things back.** Everything you sweep can be restored until you empty the Trash.
+- **Reveal in Finder, open the Trash.** Everything you sweep can be put back from the Trash until you empty it.
 - **Themes and layouts.** Instrument, Glass and Light themes. Floating cards or classic panes.
 - **Updates itself.** Signed, notarized universal builds, checked on launch from GitHub Releases, with a one-click restart.
 
@@ -95,7 +95,7 @@ Full disk scan from `/` on a MacBook Pro (M3 Pro, 12 cores, APFS), 8 threads, 10
 | --- | ---: | ---: | ---: |
 | **Osoji** | **34 s** | **30 s** | **~330 MB** |
 
-And on a 8.9 million entry home folder, warm cache, 8 threads:
+And on an 8.9-million-entry home folder, warm cache, 8 threads:
 
 | Walker | Median | vs Osoji | Peak memory |
 | --- | ---: | ---: | ---: |
@@ -115,7 +115,7 @@ How it gets there, in short: every worker thread drains `getattrlistbulk` into a
 
 Disk cleaners are only useful if you dare to press the button. Osoji is built around that.
 
-- **Trash only.** The app moves items to the macOS Trash and nothing else. "Delete permanently" is in the UI, disabled, and stays that way until the backend grows a command for it.
+- **Trash only.** The app moves items to the macOS Trash and nothing else. "Delete permanently" is in the UI and disabled.
 - **Review before anything moves.** Dropped and ticked items sit in a bin until you open the review sheet, see the total, and confirm. A setting asks once more for anything over 1 GB.
 - **Protected paths are off limits.** `/System`, `/Library`, `/usr`, your home folder, Keychains, Mail, Messages, iCloud Drive, Dropbox and the like are never offered and cannot be swept. Personal folders such as Desktop and Documents are marked risky and ask twice.
 - **Readable rules.** The policy lives in one TOML file, [`src-tauri/crates/scan-policy/policy/macos.toml`](src-tauri/crates/scan-policy/policy/macos.toml), with an id, a reason and a safety level per rule. Read it, argue with it, send a pull request.
