@@ -4,8 +4,8 @@ import type { Volume } from "./types";
 /** Highest fraction shown while a scan is still running, so the ring never reads as finished early. */
 const RUNNING_CAP = 0.99;
 
-/** What a completed scan of a root found, remembered to pace the next one. */
-export type ScanTotal = { bytes: number; entries: number };
+/** What a completed scan of a root found, remembered to pace the next one. `entries` is null for records kept from before it was counted. */
+export type ScanTotal = { bytes: number; entries: number | null };
 
 /** What a scan is expected to find. `entries` is null when only the byte total can be guessed. */
 export type ScanExpectation = { bytes: number; entries: number | null };

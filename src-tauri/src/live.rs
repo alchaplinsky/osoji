@@ -35,7 +35,7 @@ use serde::Serialize;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Listened for in src/lib/api.ts.
@@ -52,6 +52,10 @@ const WALK_THREADS: usize = 2;
 /// Each retry follows a sweep that landed mid-batch; losing this many races in a row is not
 /// converging, and the next batch for these directories lists them again anyway.
 const ATTEMPTS: usize = 3;
+
+/// A locked phase at least this long is logged: views and sweeps wait on the lock, so a hold of
+/// this length is what the UI feels as a stall after a scan.
+const SLOW_HOLD: Duration = Duration::from_millis(250);
 
 #[derive(Serialize, Clone)]
 struct Changed {
@@ -112,7 +116,14 @@ pub(crate) fn drain(state: &AppState, emit: impl Fn(Vec<NodeId>)) {
     if queued.is_empty() {
         return;
     }
-    apply_batch(state, Batch::merge(queued), emit);
+    let batch = Batch::merge(queued);
+    let (dirs, rescans) = (batch.dirs.len(), batch.rescan.len());
+    let t0 = Instant::now();
+    apply_batch(state, batch, emit);
+    eprintln!(
+        "live: drained {dirs} changed directories and {rescans} rescans queued during the scan in {} ms",
+        t0.elapsed().as_millis()
+    );
 }
 
 /// Fold one watcher batch into the scan. `emit` gets the directories whose contents changed,
@@ -247,7 +258,13 @@ impl Snapshot {
 fn locked<R>(state: &AppState, generation: u64, f: impl FnOnce(&mut Scan) -> R) -> Option<R> {
     let mut guard = state.scan.lock().unwrap();
     let scan = guard.as_mut()?;
-    (state.generation.load(Ordering::Acquire) == generation).then(|| f(scan))
+    let t0 = Instant::now();
+    let result = (state.generation.load(Ordering::Acquire) == generation).then(|| f(scan));
+    let held = t0.elapsed();
+    if held >= SLOW_HOLD {
+        eprintln!("live: held the scan lock for {} ms applying a batch", held.as_millis());
+    }
+    result
 }
 
 /// What the first locked phase did.

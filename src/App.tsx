@@ -54,7 +54,8 @@ export default function App() {
   const [volume, setVolume] = useState<Volume | null>(null);
   const [volumes, setVolumes] = useState<Volume[]>([]);
   const totals = useScanTotals();
-  const [finishing, setFinishing] = useState(false);
+  /** The finished scan's breakdown has taken over (or failed to load), so the scan screen rests instead of holding 100%. */
+  const [handedOff, setHandedOff] = useState(false);
   const [hoverId, setHoverId] = useState<HoverId>(null);
   const [listOpen, setListOpen] = useState(true);
   const [review, setReview] = useState(false);
@@ -95,8 +96,12 @@ export default function App() {
   const { refresh: refreshWatchers, reset: resetWatchers } = watchers;
   const { clear: clearBin } = bin;
   const { remember } = totals;
+  // Derived rather than set in the effect below: a render between "done" and `finishing` would show
+  // the ring at rest for a frame and restart its easing from zero, cutting the 100% rest short.
+  const finishing = scan.status === "done" && scan.summary !== null && !scan.summary.cancelled && !handedOff;
   useEffect(() => {
     if (scan.status === "scanning") {
+      setHandedOff(false);
       reset();
       resetInsights();
       resetWatchers();
@@ -106,12 +111,14 @@ export default function App() {
       const done = scan.summary;
       const completed = done !== null && !done.cancelled;
       if (completed) remember(done.root, { bytes: done.bytes, entries: done.entries });
-      setFinishing(completed);
       const settle = new Promise((resolve) => setTimeout(resolve, completed ? SCAN_SETTLE_MS : 0));
-      Promise.all([load(0), loadInsights(), refreshWatchers(), loadTrash(), settle])
+      // The breakdown needs only the root view. The rest feeds other screens and badges, and the
+      // slowest of it (suggestions, largest files) passes over every node, so it loads behind the chart.
+      Promise.all([load(0), settle])
         .then(() => setScreen("breakdown"))
         .catch(console.error)
-        .finally(() => setFinishing(false));
+        .finally(() => setHandedOff(true));
+      Promise.all([loadInsights(), refreshWatchers(), loadTrash()]).catch(console.error);
     }
   }, [scan.status, scan.summary, load, reset, loadInsights, resetInsights, refreshWatchers, resetWatchers, clearBin, remember, loadTrash]);
 

@@ -34,10 +34,19 @@ const SMOOTH_TAU_MS = 120;
 /** How long a finished scan rests at 100% before the breakdown takes over: enough for the easing to land. */
 export const SCAN_SETTLE_MS = 700;
 
-function titleFor(status: ScanStatus, rootLabel: string) {
-  switch (status) {
+/** The scan status, with the rest at 100% between a completed scan and its breakdown as a phase of its own. */
+type Phase = ScanStatus | "finishing";
+
+function statsOf(summary: ScanSummary) {
+  return `${humanCount(summary.entries)} items · ${humanBytes(summary.bytes)} in ${humanDuration(summary.elapsed_ms)}.`;
+}
+
+function titleFor(phase: Phase, rootLabel: string) {
+  switch (phase) {
     case "scanning":
       return `Scanning ${rootLabel}`;
+    case "finishing":
+      return "Scan complete";
     case "done":
       return "Scan again?";
     case "stopped":
@@ -49,14 +58,15 @@ function titleFor(status: ScanStatus, rootLabel: string) {
   }
 }
 
-function subFor(status: ScanStatus, summary: ScanSummary | null, error: string | null) {
-  switch (status) {
+function subFor(phase: Phase, summary: ScanSummary | null, error: string | null) {
+  switch (phase) {
     case "scanning":
       return "Osoji is reading every folder. Nothing is removed during a scan.";
+    case "finishing":
+      return summary ? statsOf(summary) : "Nothing is removed without your say-so.";
     case "done": {
       const tail = "If you have moved files around, a fresh scan takes about a minute.";
-      if (!summary) return tail;
-      return `${humanCount(summary.entries)} items · ${humanBytes(summary.bytes)} in ${humanDuration(summary.elapsed_ms)}. ${tail}`;
+      return summary ? `${statsOf(summary)} ${tail}` : tail;
     }
     case "stopped":
       return "Nothing was kept from the stopped scan. Start again to see the breakdown.";
@@ -103,6 +113,7 @@ function ringCentre(scanning: boolean, fraction: number | null, found: string, r
 export default function ScanScreen({ volume, scanRoot, rootLabel, status, progress, expected, finishing = false, summary, error, onStart, onStop }: ScanScreenProps) {
   const { theme } = useTheme();
   const scanning = status === "scanning" || finishing;
+  const phase: Phase = finishing ? "finishing" : status;
   const isVolume = volume !== null && volume.total > 0 && scanRoot === volume.mount;
   const used = isVolume ? (volume.total - volume.free) / volume.total : 0;
   // The ring is the item being scanned: a disk shows its used share with free space left open, a
@@ -127,8 +138,8 @@ export default function ScanScreen({ volume, scanRoot, rootLabel, status, progre
     <section className={styles.screen}>
       <div className={styles.dragStrip} data-tauri-drag-region="deep" />
       <ScanRing span={span} scanning={scanning} progress={fraction} value={centre.value} valueSize={centre.size} label={centre.label} />
-      <div className={styles.title}>{titleFor(status, rootLabel)}</div>
-      <div className={styles.sub}>{subFor(status, summary, error)}</div>
+      <div className={styles.title}>{titleFor(phase, rootLabel)}</div>
+      <div className={styles.sub}>{subFor(phase, summary, error)}</div>
 
       {scanning ? (
         <>
@@ -139,12 +150,15 @@ export default function ScanScreen({ volume, scanRoot, rootLabel, status, progre
           {barTotal !== null && (
             <SegmentBar segments={segmentsOf(tops, topShares, restShare, theme)} total={1} height={8} className={styles.bar} />
           )}
+          {/* The breakdown waits on the backend's wind-down; saying so keeps a long rest from reading as stuck. */}
           <div className={styles.path}>
-            Reading {rootLabel}… {humanCount(progress?.dirs ?? 0)} folders
+            {finishing ? "Preparing the breakdown…" : `Reading ${rootLabel}… ${humanCount(progress?.dirs ?? 0)} folders`}
           </div>
-          <Button muted className={styles.stop} onClick={onStop}>
-            Stop
-          </Button>
+          {!finishing && (
+            <Button muted className={styles.stop} onClick={onStop}>
+              Stop
+            </Button>
+          )}
         </>
       ) : (
         <>

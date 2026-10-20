@@ -9,16 +9,25 @@ export type ScanTotals = {
   remember: (root: string, total: ScanTotal) => void;
 };
 
-function isTotal(v: unknown): v is ScanTotal {
-  return typeof v === "object" && v !== null && typeof (v as ScanTotal).bytes === "number" && typeof (v as ScanTotal).entries === "number";
+/** A stored record, or a plain byte total from before the entry count was kept: its bytes still pace a scan. */
+export function parseTotal(v: unknown): ScanTotal | null {
+  if (typeof v === "number") return v > 0 ? { bytes: v, entries: null } : null;
+  if (typeof v !== "object" || v === null) return null;
+  const { bytes, entries } = v as Partial<ScanTotal>;
+  if (typeof bytes !== "number" || bytes <= 0) return null;
+  return { bytes, entries: typeof entries === "number" && entries > 0 ? entries : null };
 }
 
-/** Entries from before the entry count was kept were plain byte totals; those start over. */
 function load(): Record<string, ScanTotal> {
   try {
     const stored: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
     if (!stored || typeof stored !== "object") return {};
-    return Object.fromEntries(Object.entries(stored).filter((e): e is [string, ScanTotal] => isTotal(e[1]) && e[1].bytes > 0 && e[1].entries > 0));
+    const totals: Record<string, ScanTotal> = {};
+    for (const [root, v] of Object.entries(stored)) {
+      const total = parseTotal(v);
+      if (total) totals[root] = total;
+    }
+    return totals;
   } catch {
     return {};
   }
@@ -33,7 +42,7 @@ export function useScanTotals(): ScanTotals {
 
   const get = useCallback((root: string) => totals[root] ?? null, [totals]);
   const remember = useCallback((root: string, total: ScanTotal) => {
-    if (total.bytes <= 0 || total.entries <= 0) return;
+    if (total.bytes <= 0) return;
     setTotals((t) => (t[root]?.bytes === total.bytes && t[root]?.entries === total.entries ? t : { ...t, [root]: total }));
   }, []);
 
