@@ -62,7 +62,7 @@ It exists because the good disk visualisers for the Mac are closed source and th
 
 **What makes it different**
 
-- **Fast enough to scan the whole disk every time.** About 2.4× faster than DaisyDisk on the same machine, and ahead of `dua-cli`, `jwalk` and `du`.
+- **Fast enough to scan the whole disk every time.** Ahead of `dua-cli`, `jwalk` and `du` on the same machine.
 - **Stays current while it is open.** An FSEvents watcher keeps the finished scan in sync with the disk. Build a project, empty a cache, trash a folder, and the chart updates. No rescan.
 - **Suggestions you can trust.** A readable policy file decides what is safe, what needs review, and what must never be touched. Every suggestion comes with a reason and the bytes it frees.
 - **Nothing goes until you review.** Items collect in a bin. You confirm the total. Everything goes to the macOS Trash, never to oblivion.
@@ -94,7 +94,6 @@ Full disk scan from `/` on a MacBook Pro (M3 Pro, 12 cores, APFS), 8 threads, 10
 | Scanner | Cold cache | Warm cache | Peak memory |
 | --- | ---: | ---: | ---: |
 | **Osoji** | **34 s** | **30 s** | **~330 MB** |
-| DaisyDisk 4.34.2 | 79 s | 81 s | — |
 
 And on a 8.9 million entry home folder, warm cache, 8 threads:
 
@@ -216,7 +215,7 @@ Releases are built, signed, notarized and published to GitHub Releases by the **
 ## Roadmap
 
 - [x] Rust scan core with arena, hard-link dedup and a jwalk reference walker
-- [x] `getattrlistbulk` walker with in-scan aggregation, faster than dua-cli and DaisyDisk
+- [x] `getattrlistbulk` walker with in-scan aggregation, faster than dua-cli
 - [x] Tauri app with live progress, bounded binary views and the sunburst
 - [x] Full Disk Access detection and banner
 - [x] Cleanup policy, collector bin, review sheet and Trash
